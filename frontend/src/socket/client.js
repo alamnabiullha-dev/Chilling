@@ -1,6 +1,5 @@
-
 import { io } from "socket.io-client";
-import { API_URL } from "./api";
+import { API_URL } from "../services/api";
 
 let socket = null;
 
@@ -17,8 +16,11 @@ export function getSocket() {
       auth: {
         token,
       },
+
       transports: ["websocket", "polling"],
+
       withCredentials: true,
+
       autoConnect: true,
     });
 
@@ -46,4 +48,3 @@ export function resetSocket() {
 }
 
 export default getSocket;
-
