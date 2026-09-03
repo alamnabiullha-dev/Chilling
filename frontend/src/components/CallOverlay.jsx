@@ -1,3 +1,4 @@
+
 import { useEffect } from "react";
 
 import {
@@ -39,16 +40,6 @@ export default function CallOverlay({ manager }) {
   |--------------------------------------------------------------------------
   */
 
-  /*
-   * Incoming call:
-   * incoming.from
-   *
-   * Active call:
-   * call
-   *
-   * This fixes the problem where caller side had no caller data.
-   */
-
   const caller =
     incoming?.from ||
     call?.from ||
@@ -60,6 +51,7 @@ export default function CallOverlay({ manager }) {
     caller?.name ||
     caller?.username ||
     caller?.phone ||
+    incoming?.name ||
     call?.name ||
     call?.username ||
     "Aurora Contact";
@@ -68,6 +60,7 @@ export default function CallOverlay({ manager }) {
     caller?.avatar ||
     caller?.profilePicture ||
     caller?.image ||
+    incoming?.avatar ||
     call?.avatar ||
     call?.profilePicture ||
     call?.image ||
@@ -77,22 +70,26 @@ export default function CallOverlay({ manager }) {
   |--------------------------------------------------------------------------
   | CALL TYPE
   |--------------------------------------------------------------------------
+  |
+  | IMPORTANT:
+  | Previous code had a ternary precedence problem.
+  | Now video detection is explicit.
+  |
   */
 
-  const callType =
-    incoming?.call?.type ||
-    incoming?.type ||
-    incoming?.video
-      ? "video"
-      : call?.call?.type ||
-        call?.type ||
-        call?.video
-        ? "video"
-        : manager?.callType ||
-          "voice";
-
   const isVideoCall =
-    callType === "video";
+    Boolean(
+      incoming?.video === true ||
+      incoming?.type === "video" ||
+      incoming?.call?.video === true ||
+      incoming?.call?.type === "video" ||
+      call?.video === true ||
+      call?.type === "video" ||
+      call?.call?.video === true ||
+      call?.call?.type === "video"
+    );
+
+  const callType = isVideoCall ? "video" : "voice";
 
   /*
   |--------------------------------------------------------------------------
@@ -113,8 +110,7 @@ export default function CallOverlay({ manager }) {
   */
 
   useEffect(() => {
-    const video =
-      localVideoRef?.current;
+    const video = localVideoRef?.current;
 
     if (!video) {
       return;
@@ -142,16 +138,7 @@ export default function CallOverlay({ manager }) {
       );
     });
 
-    return () => {
-      /*
-       * Don't stop the stream here.
-       * useCallManager owns the stream.
-       */
-    };
-  }, [
-    localStream,
-    localVideoRef,
-  ]);
+  }, [localStream, localVideoRef]);
 
   /*
   |--------------------------------------------------------------------------
@@ -160,8 +147,7 @@ export default function CallOverlay({ manager }) {
   */
 
   useEffect(() => {
-    const audio =
-      remoteAudioRef?.current;
+    const audio = remoteAudioRef?.current;
 
     if (!audio) {
       return;
@@ -192,11 +178,8 @@ export default function CallOverlay({ manager }) {
           );
         });
     }
-  }, [
-    remoteAudioRef,
-    call,
-    status,
-  ]);
+
+  }, [remoteAudioRef, call, status]);
 
   /*
   |--------------------------------------------------------------------------
@@ -205,8 +188,7 @@ export default function CallOverlay({ manager }) {
   */
 
   useEffect(() => {
-    const video =
-      remoteVideoRef?.current;
+    const video = remoteVideoRef?.current;
 
     if (!video) {
       return;
@@ -222,16 +204,11 @@ export default function CallOverlay({ manager }) {
     /*
      * IMPORTANT:
      *
-     * Remote audio is handled by <audio>.
-     * Therefore remote video MUST stay muted.
+     * Remote audio is played through
+     * remoteAudioRef.
      *
-     * Otherwise:
-     *
-     * remote video audio
-     * +
-     * remote audio element
-     *
-     * = duplicate sound / echo.
+     * Therefore remote video stays muted
+     * to prevent duplicate audio / echo.
      */
 
     video.muted = true;
@@ -251,11 +228,8 @@ export default function CallOverlay({ manager }) {
           );
         });
     }
-  }, [
-    remoteVideoRef,
-    call,
-    status,
-  ]);
+
+  }, [remoteVideoRef, call, status]);
 
   /*
   |--------------------------------------------------------------------------
@@ -417,13 +391,7 @@ export default function CallOverlay({ manager }) {
                 ref={remoteVideoRef}
                 autoPlay
                 playsInline
-
-                /*
-                 * IMPORTANT:
-                 * Audio comes from remoteAudioRef.
-                 */
                 muted
-
                 className="remote-video"
               />
 
@@ -477,9 +445,7 @@ export default function CallOverlay({ manager }) {
 
                   <div className="camera-off-avatar">
                     <Avatar
-                      user={
-                        manager?.user
-                      }
+                      user={manager?.user}
                     />
                   </div>
 
@@ -675,3 +641,4 @@ export default function CallOverlay({ manager }) {
     </section>
   );
 }
+
