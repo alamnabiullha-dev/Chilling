@@ -57,6 +57,10 @@ export function useCallManager(currentUser) {
     console.log("CLOSING CALL");
     console.log("================================");
 
+    // ----------------------------------------------------------
+    // CLOSE PEER
+    // ----------------------------------------------------------
+
     if (peerRef.current) {
       try {
         peerRef.current.ontrack = null;
@@ -73,7 +77,10 @@ export function useCallManager(currentUser) {
 
     peerRef.current = null;
 
-    // Stop local tracks
+    // ----------------------------------------------------------
+    // STOP LOCAL TRACKS
+    // ----------------------------------------------------------
+
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => {
         try {
@@ -86,7 +93,10 @@ export function useCallManager(currentUser) {
 
     localStreamRef.current = null;
 
-    // Clear local video
+    // ----------------------------------------------------------
+    // CLEAR LOCAL VIDEO
+    // ----------------------------------------------------------
+
     if (localVideoRef.current) {
       try {
         localVideoRef.current.pause();
@@ -95,7 +105,10 @@ export function useCallManager(currentUser) {
       localVideoRef.current.srcObject = null;
     }
 
-    // Clear remote video
+    // ----------------------------------------------------------
+    // CLEAR REMOTE VIDEO
+    // ----------------------------------------------------------
+
     if (remoteVideoRef.current) {
       try {
         remoteVideoRef.current.pause();
@@ -104,7 +117,10 @@ export function useCallManager(currentUser) {
       remoteVideoRef.current.srcObject = null;
     }
 
-    // Clear remote audio
+    // ----------------------------------------------------------
+    // CLEAR REMOTE AUDIO
+    // ----------------------------------------------------------
+
     if (remoteAudioRef.current) {
       try {
         remoteAudioRef.current.pause();
@@ -113,15 +129,25 @@ export function useCallManager(currentUser) {
       remoteAudioRef.current.srcObject = null;
     }
 
+    // ----------------------------------------------------------
+    // RESET REFS
+    // ----------------------------------------------------------
+
     remoteStreamRef.current = null;
 
     remoteUserRef.current = null;
+
     currentCallIdRef.current = null;
 
     pendingOfferRef.current = null;
+
     pendingCandidatesRef.current = [];
 
     acceptedRef.current = false;
+
+    // ----------------------------------------------------------
+    // RESET STATE
+    // ----------------------------------------------------------
 
     setLocalStream(null);
     setCall(null);
@@ -130,6 +156,7 @@ export function useCallManager(currentUser) {
 
     setMuted(false);
     setCameraOff(false);
+    setError("");
   }, []);
 
   // ============================================================
@@ -147,8 +174,15 @@ export function useCallManager(currentUser) {
         "Camera/microphone is not available. Please use HTTPS or localhost.";
 
       setError(message);
+
       throw new Error(message);
     }
+
+    // ----------------------------------------------------------
+    // NORMALIZE CALL TYPE
+    // ----------------------------------------------------------
+
+    const callType = type === "video" ? "video" : "voice";
 
     const constraints = {
       audio: {
@@ -158,7 +192,7 @@ export function useCallManager(currentUser) {
       },
 
       video:
-        type === "video"
+        callType === "video"
           ? {
               width: {
                 ideal: 1280,
@@ -175,7 +209,8 @@ export function useCallManager(currentUser) {
       console.log("================================");
       console.log("REQUESTING MEDIA");
       console.log({
-        type,
+        requestedType: type,
+        normalizedType: callType,
         constraints,
       });
       console.log("================================");
@@ -185,38 +220,49 @@ export function useCallManager(currentUser) {
           constraints
         );
 
+      console.log("================================");
+      console.log("MEDIA GRANTED");
       console.log(
-        "MEDIA GRANTED:",
         stream.getTracks().map((track) => ({
           kind: track.kind,
           id: track.id,
           enabled: track.enabled,
+          muted: track.muted,
           readyState: track.readyState,
         }))
       );
+      console.log("================================");
+
+      // ----------------------------------------------------------
+      // SAVE LOCAL STREAM
+      // ----------------------------------------------------------
 
       localStreamRef.current = stream;
+
       setLocalStream(stream);
 
-      // Attach local video immediately if available
+      // ----------------------------------------------------------
+      // ATTACH LOCAL VIDEO
+      // ----------------------------------------------------------
+
       if (
-        type === "video" &&
+        callType === "video" &&
         localVideoRef.current
       ) {
-        localVideoRef.current.srcObject =
-          stream;
+        const video =
+          localVideoRef.current;
 
-        localVideoRef.current.muted =
-          true;
-
-        localVideoRef.current.playsInline =
-          true;
-
-        localVideoRef.current.autoplay =
-          true;
+        video.srcObject = stream;
+        video.muted = true;
+        video.playsInline = true;
+        video.autoplay = true;
 
         try {
-          await localVideoRef.current.play();
+          await video.play();
+
+          console.log(
+            "LOCAL VIDEO PLAYING"
+          );
         } catch (err) {
           console.log(
             "Local video play error:",
@@ -235,19 +281,29 @@ export function useCallManager(currentUser) {
       let message =
         "Could not access microphone/camera.";
 
-      if (err.name === "NotAllowedError") {
+      if (
+        err.name === "NotAllowedError"
+      ) {
         message =
           "Microphone/camera permission was denied.";
-      } else if (err.name === "NotFoundError") {
+      } else if (
+        err.name === "NotFoundError"
+      ) {
         message =
           "No microphone or camera was found.";
-      } else if (err.name === "NotReadableError") {
+      } else if (
+        err.name === "NotReadableError"
+      ) {
         message =
           "Microphone/camera is already being used.";
-      } else if (err.name === "SecurityError") {
+      } else if (
+        err.name === "SecurityError"
+      ) {
         message =
           "Camera/microphone requires HTTPS.";
-      } else if (err.name === "OverconstrainedError") {
+      } else if (
+        err.name === "OverconstrainedError"
+      ) {
         message =
           "Camera settings are not supported.";
       }
@@ -264,7 +320,9 @@ export function useCallManager(currentUser) {
 
   const attachRemoteStream = useCallback(
     async (stream) => {
-      if (!stream) return;
+      if (!stream) {
+        return;
+      }
 
       remoteStreamRef.current = stream;
 
@@ -272,6 +330,7 @@ export function useCallManager(currentUser) {
       console.log(
         "REMOTE STREAM UPDATED"
       );
+
       console.log(
         stream.getTracks().map((track) => ({
           kind: track.kind,
@@ -281,17 +340,20 @@ export function useCallManager(currentUser) {
           readyState: track.readyState,
         }))
       );
+
       console.log("================================");
 
-      // --------------------------------------------------------
+      // ----------------------------------------------------------
       // REMOTE VIDEO
-      // --------------------------------------------------------
+      // ----------------------------------------------------------
 
       if (remoteVideoRef.current) {
         const video =
           remoteVideoRef.current;
 
-        if (video.srcObject !== stream) {
+        if (
+          video.srcObject !== stream
+        ) {
           video.srcObject = stream;
         }
 
@@ -313,15 +375,17 @@ export function useCallManager(currentUser) {
         }
       }
 
-      // --------------------------------------------------------
+      // ----------------------------------------------------------
       // REMOTE AUDIO
-      // --------------------------------------------------------
+      // ----------------------------------------------------------
 
       if (remoteAudioRef.current) {
         const audio =
           remoteAudioRef.current;
 
-        if (audio.srcObject !== stream) {
+        if (
+          audio.srcObject !== stream
+        ) {
           audio.srcObject = stream;
         }
 
@@ -367,7 +431,10 @@ export function useCallManager(currentUser) {
         );
       }
 
-      // Close previous peer
+      // ----------------------------------------------------------
+      // CLOSE OLD PEER
+      // ----------------------------------------------------------
+
       if (peerRef.current) {
         try {
           peerRef.current.close();
@@ -389,15 +456,16 @@ export function useCallManager(currentUser) {
           iceServers,
         });
 
-      // --------------------------------------------------------
+      // ==========================================================
       // ICE CANDIDATE
-      // --------------------------------------------------------
+      // ==========================================================
 
       peer.onicecandidate = (event) => {
         if (!event.candidate) {
           console.log(
             "ICE GATHERING COMPLETE"
           );
+
           return;
         }
 
@@ -415,28 +483,26 @@ export function useCallManager(currentUser) {
         );
       };
 
-      // --------------------------------------------------------
+      // ==========================================================
       // ICE ERROR
-      // --------------------------------------------------------
+      // ==========================================================
 
       peer.onicecandidateerror = (event) => {
         console.error(
           "ICE CANDIDATE ERROR:",
           {
-            errorCode: event.errorCode,
-            errorText: event.errorText,
+            errorCode:
+              event.errorCode,
+            errorText:
+              event.errorText,
             url: event.url,
           }
         );
       };
 
-      // --------------------------------------------------------
+      // ==========================================================
       // REMOTE TRACK
-      // IMPORTANT FIX
-      //
-      // We create ONE MediaStream and add BOTH
-      // audio + video tracks into it.
-      // --------------------------------------------------------
+      // ==========================================================
 
       peer.ontrack = async (event) => {
         console.log("================================");
@@ -444,22 +510,28 @@ export function useCallManager(currentUser) {
           "REMOTE TRACK RECEIVED:",
           event.track.kind
         );
+
         console.log({
-          trackId: event.track.id,
-          kind: event.track.kind,
-          enabled: event.track.enabled,
-          muted: event.track.muted,
-          readyState: event.track.readyState,
+          trackId:
+            event.track.id,
+          kind:
+            event.track.kind,
+          enabled:
+            event.track.enabled,
+          muted:
+            event.track.muted,
+          readyState:
+            event.track.readyState,
         });
+
         console.log("================================");
 
         let stream =
           event.streams?.[0];
 
-        // ------------------------------------------------------
-        // If browser didn't provide stream,
-        // create our own shared MediaStream.
-        // ------------------------------------------------------
+        // --------------------------------------------------------
+        // CREATE SHARED STREAM IF NEEDED
+        // --------------------------------------------------------
 
         if (!stream) {
           if (!remoteStreamRef.current) {
@@ -485,10 +557,9 @@ export function useCallManager(currentUser) {
             );
           }
         } else {
-          // ----------------------------------------------------
-          // IMPORTANT:
-          // Make sure both tracks are preserved.
-          // ----------------------------------------------------
+          // ------------------------------------------------------
+          // USE BROWSER PROVIDED STREAM
+          // ------------------------------------------------------
 
           if (
             !remoteStreamRef.current ||
@@ -504,17 +575,24 @@ export function useCallManager(currentUser) {
           "REMOTE STREAM TRACKS:",
           remoteStreamRef.current
             ?.getTracks()
-            .map((track) => track.kind)
+            .map(
+              (track) =>
+                track.kind
+            )
         );
+
+        // --------------------------------------------------------
+        // ATTACH AUDIO + VIDEO
+        // --------------------------------------------------------
 
         await attachRemoteStream(
           remoteStreamRef.current
         );
       };
 
-      // --------------------------------------------------------
+      // ==========================================================
       // CONNECTION STATE
-      // --------------------------------------------------------
+      // ==========================================================
 
       peer.onconnectionstatechange =
         () => {
@@ -530,21 +608,27 @@ export function useCallManager(currentUser) {
             console.log(
               "================================"
             );
+
             console.log(
               "CALL CONNECTED"
             );
+
             console.log(
               "================================"
             );
 
-            setStatus("connected");
+            setStatus(
+              "connected"
+            );
           }
 
           if (
             peer.connectionState ===
             "connecting"
           ) {
-            setStatus("connecting");
+            setStatus(
+              "connecting"
+            );
           }
 
           if (
@@ -555,17 +639,28 @@ export function useCallManager(currentUser) {
               "WEBRTC CONNECTION FAILED"
             );
 
-            setStatus("failed");
+            setStatus(
+              "failed"
+            );
 
             setError(
               "WebRTC connection failed. Please try again."
             );
           }
+
+          if (
+            peer.connectionState ===
+            "disconnected"
+          ) {
+            console.log(
+              "WEBRTC DISCONNECTED"
+            );
+          }
         };
 
-      // --------------------------------------------------------
-      // ICE CONNECTION
-      // --------------------------------------------------------
+      // ==========================================================
+      // ICE CONNECTION STATE
+      // ==========================================================
 
       peer.oniceconnectionstatechange =
         () => {
@@ -610,7 +705,7 @@ export function useCallManager(currentUser) {
   );
 
   // ============================================================
-  // HANDLE OFFER - RECEIVER SIDE
+  // HANDLE OFFER - RECEIVER
   // ============================================================
 
   const handleOffer = useCallback(
@@ -621,16 +716,35 @@ export function useCallManager(currentUser) {
       type = "voice",
     }) => {
       try {
+        // --------------------------------------------------------
+        // IMPORTANT FIX
+        //
+        // Only video or voice is allowed.
+        // --------------------------------------------------------
+
+        const callType =
+          type === "video"
+            ? "video"
+            : "voice";
+
         console.log("================================");
         console.log(
           "HANDLING WEBRTC OFFER"
         );
+
         console.log({
           from,
           callId,
-          type,
+          receivedType: type,
+          normalizedType:
+            callType,
         });
+
         console.log("================================");
+
+        // --------------------------------------------------------
+        // VALIDATION
+        // --------------------------------------------------------
 
         if (!offer) {
           throw new Error(
@@ -650,12 +764,16 @@ export function useCallManager(currentUser) {
           );
         }
 
-        // ------------------------------------------------------
-        // SAVE CALL
-        // ------------------------------------------------------
+        // --------------------------------------------------------
+        // SAVE CALL ID
+        // --------------------------------------------------------
 
         currentCallIdRef.current =
           callId;
+
+        // --------------------------------------------------------
+        // CALLER ID
+        // --------------------------------------------------------
 
         const callerId =
           typeof from === "object"
@@ -667,6 +785,10 @@ export function useCallManager(currentUser) {
             "Caller ID is invalid."
           );
         }
+
+        // --------------------------------------------------------
+        // SAVE REMOTE USER
+        // --------------------------------------------------------
 
         if (
           typeof from === "object"
@@ -680,37 +802,51 @@ export function useCallManager(currentUser) {
             from;
         }
 
-        // ------------------------------------------------------
+        // ========================================================
         // RECEIVER MEDIA
         //
-        // This happens ONLY after Accept.
-        // ------------------------------------------------------
+        // THIS IS THE IMPORTANT PART.
+        //
+        // For video call:
+        // getMedia("video")
+        //
+        // This gives:
+        // audio + video
+        // ========================================================
 
+        console.log("================================");
         console.log(
-          "RECEIVER REQUESTING MEDIA..."
+          "RECEIVER REQUESTING MEDIA"
         );
+        console.log({
+          type: callType,
+        });
+        console.log("================================");
 
         const stream =
-          await getMedia(type);
+          await getMedia(
+            callType
+          );
 
-        console.log(
-          "================================"
-        );
+        console.log("================================");
         console.log(
           "RECEIVER MEDIA READY"
         );
+
         console.log(
           stream
             .getTracks()
-            .map((track) => track.kind)
-        );
-        console.log(
-          "================================"
+            .map(
+              (track) =>
+                track.kind
+            )
         );
 
-        // ------------------------------------------------------
-        // CREATE RECEIVER PEER
-        // ------------------------------------------------------
+        console.log("================================");
+
+        // --------------------------------------------------------
+        // CREATE PEER
+        // --------------------------------------------------------
 
         const peer =
           createPeer(
@@ -718,45 +854,52 @@ export function useCallManager(currentUser) {
             callId
           );
 
-        // ------------------------------------------------------
-        // CRITICAL:
+        // ========================================================
+        // ADD RECEIVER TRACKS
         //
-        // ADD RECEIVER AUDIO + VIDEO
-        // BEFORE createAnswer()
+        // VIDEO CALL:
+        // audio + video
         //
-        // This is what sends receiver's
-        // video back to caller.
-        // ------------------------------------------------------
+        // VOICE CALL:
+        // audio
+        // ========================================================
 
         stream
           .getTracks()
-          .forEach((track) => {
-            console.log(
-              "ADDING RECEIVER TRACK:",
-              track.kind
-            );
+          .forEach(
+            (track) => {
+              console.log(
+                "ADDING RECEIVER TRACK:",
+                track.kind
+              );
 
-            peer.addTrack(
-              track,
-              stream
-            );
-          });
+              peer.addTrack(
+                track,
+                stream
+              );
+            }
+          );
 
         console.log(
           "RECEIVER SENDERS:",
           peer
             .getSenders()
-            .map((sender) => ({
-              kind:
-                sender.track?.kind,
-              id:
-                sender.track?.id,
-            }))
+            .map(
+              (sender) => ({
+                kind:
+                  sender.track
+                    ?.kind,
+
+                id:
+                  sender.track
+                    ?.id,
+              })
+            )
         );
 
-        // ------------------------------------------------------
+        // ========================================================
         // SET REMOTE OFFER
-        // ------------------------------------------------------
+        // ========================================================
 
         console.log(
           "SETTING REMOTE DESCRIPTION..."
@@ -772,9 +915,9 @@ export function useCallManager(currentUser) {
           "REMOTE DESCRIPTION SET"
         );
 
-        // ------------------------------------------------------
+        // ========================================================
         // ADD QUEUED ICE
-        // ------------------------------------------------------
+        // ========================================================
 
         if (
           pendingCandidatesRef.current
@@ -812,12 +955,9 @@ export function useCallManager(currentUser) {
             [];
         }
 
-        // ------------------------------------------------------
+        // ========================================================
         // CREATE ANSWER
-        //
-        // Receiver tracks are already added above.
-        // Therefore answer SDP contains receiver audio/video.
-        // ------------------------------------------------------
+        // ========================================================
 
         console.log(
           "CREATING ANSWER..."
@@ -830,6 +970,10 @@ export function useCallManager(currentUser) {
           "ANSWER CREATED"
         );
 
+        // --------------------------------------------------------
+        // SET LOCAL ANSWER
+        // --------------------------------------------------------
+
         await peer.setLocalDescription(
           answer
         );
@@ -838,9 +982,9 @@ export function useCallManager(currentUser) {
           "LOCAL ANSWER SET"
         );
 
-        // ------------------------------------------------------
-        // SEND ANSWER TO CALLER
-        // ------------------------------------------------------
+        // ========================================================
+        // SEND ANSWER
+        // ========================================================
 
         const socket =
           getSocket();
@@ -863,35 +1007,52 @@ export function useCallManager(currentUser) {
         console.log(
           "ANSWER SENT SUCCESSFULLY"
         );
+
+        console.log(
+          "ANSWER CALL TYPE:",
+          callType
+        );
+
         console.log(
           "RECEIVER VIDEO IS NOW IN ANSWER SDP"
         );
+
         console.log("================================");
 
-        // ------------------------------------------------------
-        // CALL STATE
-        // ------------------------------------------------------
+        // ========================================================
+        // UPDATE CALL STATE
+        // ========================================================
 
         setCall((existing) => {
           if (existing) {
-            return existing;
+            return {
+              ...existing,
+              type:
+                existing.type ||
+                callType,
+            };
           }
 
           return {
             _id: callId,
-            type,
+            type: callType,
           };
         });
 
         setIncoming(null);
-        setStatus("connecting");
+
+        setStatus(
+          "connecting"
+        );
       } catch (err) {
         console.error(
           "HANDLE OFFER FAILED:",
           err
         );
 
-        setStatus("failed");
+        setStatus(
+          "failed"
+        );
 
         setError(
           err.message ||
@@ -899,7 +1060,10 @@ export function useCallManager(currentUser) {
         );
       }
     },
-    [createPeer, getMedia]
+    [
+      createPeer,
+      getMedia,
+    ]
   );
 
   // ============================================================
@@ -929,29 +1093,54 @@ export function useCallManager(currentUser) {
         );
       }
 
+      // ----------------------------------------------------------
+      // NORMALIZE TYPE
+      // ----------------------------------------------------------
+
+      const callType =
+        type === "video"
+          ? "video"
+          : "voice";
+
       console.log("================================");
-      console.log("START CALL");
+      console.log(
+        "START CALL"
+      );
+
       console.log({
         receiver:
           receiver._id,
-        type,
+        type: callType,
         conversationId,
       });
+
       console.log("================================");
 
       remoteUserRef.current =
         receiver;
 
-      // ------------------------------------------------------
+      // ==========================================================
       // CALLER MEDIA
-      // ------------------------------------------------------
+      // ==========================================================
 
       const stream =
-        await getMedia(type);
+        await getMedia(
+          callType
+        );
 
-      // ------------------------------------------------------
+      console.log(
+        "CALLER STREAM:",
+        stream
+          .getTracks()
+          .map(
+            (track) =>
+              track.kind
+          )
+      );
+
+      // ==========================================================
       // CREATE CALL ON SERVER
-      // ------------------------------------------------------
+      // ==========================================================
 
       console.log(
         "INITIATING CALL ON SERVER..."
@@ -967,7 +1156,7 @@ export function useCallManager(currentUser) {
             receiver._id,
           ],
 
-          type,
+          type: callType,
 
           conversationId,
         },
@@ -997,28 +1186,35 @@ export function useCallManager(currentUser) {
             currentCallIdRef.current =
               callId;
 
-            setCall(
-              ack.call
-            );
+            // ----------------------------------------------------
+            // SAVE CALL
+            // ----------------------------------------------------
+
+            setCall({
+              ...ack.call,
+              type:
+                ack.call?.type ||
+                callType,
+            });
 
             setStatus(
               "calling"
             );
 
-            console.log(
-              "================================"
-            );
+            console.log("================================");
             console.log(
               "CALL ID:",
               callId
             );
             console.log(
-              "================================"
+              "CALL TYPE:",
+              callType
             );
+            console.log("================================");
 
-            // --------------------------------------------------
-            // CALLER PEER
-            // --------------------------------------------------
+            // ====================================================
+            // CREATE CALLER PEER
+            // ====================================================
 
             const peer =
               createPeer(
@@ -1026,39 +1222,46 @@ export function useCallManager(currentUser) {
                 callId
               );
 
-            // --------------------------------------------------
-            // CALLER TRACKS
-            // --------------------------------------------------
+            // ====================================================
+            // ADD CALLER TRACKS
+            // ====================================================
 
             stream
               .getTracks()
-              .forEach((track) => {
-                console.log(
-                  "ADDING CALLER TRACK:",
-                  track.kind
-                );
+              .forEach(
+                (track) => {
+                  console.log(
+                    "ADDING CALLER TRACK:",
+                    track.kind
+                  );
 
-                peer.addTrack(
-                  track,
-                  stream
-                );
-              });
+                  peer.addTrack(
+                    track,
+                    stream
+                  );
+                }
+              );
 
             console.log(
               "CALLER SENDERS:",
               peer
                 .getSenders()
-                .map((sender) => ({
-                  kind:
-                    sender.track?.kind,
-                  id:
-                    sender.track?.id,
-                }))
+                .map(
+                  (sender) => ({
+                    kind:
+                      sender.track
+                        ?.kind,
+
+                    id:
+                      sender.track
+                        ?.id,
+                  })
+                )
             );
 
-            // --------------------------------------------------
+            // ====================================================
             // CREATE OFFER
-            // --------------------------------------------------
+            // ====================================================
 
             console.log(
               "CREATING OFFER..."
@@ -1075,23 +1278,40 @@ export function useCallManager(currentUser) {
               "LOCAL OFFER SET"
             );
 
-            // --------------------------------------------------
+            // ====================================================
             // SEND OFFER
-            // --------------------------------------------------
+            //
+            // IMPORTANT:
+            // type is included here.
+            // ====================================================
 
+            console.log("================================");
             console.log(
-              "SENDING OFFER..."
+              "SENDING OFFER"
             );
+
+            console.log({
+              to:
+                receiver._id,
+              callId,
+              type: callType,
+            });
+
+            console.log("================================");
 
             socket.emit(
               "webrtc:offer",
               {
                 to:
                   receiver._id,
+
                 callId,
+
                 offer:
                   peer.localDescription,
-                type,
+
+                type:
+                  callType,
               }
             );
 
@@ -1104,7 +1324,9 @@ export function useCallManager(currentUser) {
               err
             );
 
-            setStatus("failed");
+            setStatus(
+              "failed"
+            );
 
             setError(
               err.message ||
@@ -1119,7 +1341,9 @@ export function useCallManager(currentUser) {
         err
       );
 
-      setStatus("failed");
+      setStatus(
+        "failed"
+      );
 
       setError(
         err.message ||
@@ -1133,7 +1357,9 @@ export function useCallManager(currentUser) {
   // ============================================================
 
   const acceptCall = async () => {
-    if (!incoming) return;
+    if (!incoming) {
+      return;
+    }
 
     try {
       setError("");
@@ -1147,13 +1373,22 @@ export function useCallManager(currentUser) {
         );
       }
 
+      // ----------------------------------------------------------
+      // GET CALL DATA
+      // ----------------------------------------------------------
+
       const remoteId =
         incoming.from?._id ||
         incoming.from;
 
-      const type =
+      const incomingType =
         incoming.call?.type ||
         "voice";
+
+      const callType =
+        incomingType === "video"
+          ? "video"
+          : "voice";
 
       const callId =
         incoming.call?._id;
@@ -1174,16 +1409,20 @@ export function useCallManager(currentUser) {
       console.log(
         "ACCEPTING CALL"
       );
+
       console.log({
         remoteId,
-        type,
+        incomingType,
+        normalizedType:
+          callType,
         callId,
       });
+
       console.log("================================");
 
-      // ------------------------------------------------------
+      // ==========================================================
       // ACCEPT STATE
-      // ------------------------------------------------------
+      // ==========================================================
 
       acceptedRef.current =
         true;
@@ -1202,9 +1441,16 @@ export function useCallManager(currentUser) {
           remoteId;
       }
 
-      setCall(
-        incoming.call
-      );
+      // ----------------------------------------------------------
+      // SAVE CALL TYPE
+      // ----------------------------------------------------------
+
+      setCall({
+        ...incoming.call,
+        type:
+          incoming.call?.type ||
+          callType,
+      });
 
       setIncoming(null);
 
@@ -1212,9 +1458,9 @@ export function useCallManager(currentUser) {
         "connecting"
       );
 
-      // ------------------------------------------------------
+      // ==========================================================
       // INFORM SERVER
-      // ------------------------------------------------------
+      // ==========================================================
 
       socket.emit(
         "call:accept",
@@ -1228,9 +1474,19 @@ export function useCallManager(currentUser) {
         "CALL ACCEPT SENT"
       );
 
-      // ------------------------------------------------------
+      // ==========================================================
       // OFFER MAY HAVE ARRIVED BEFORE ACCEPT
-      // ------------------------------------------------------
+      //
+      // THIS WAS THE MAIN BUG.
+      //
+      // queuedOffer could contain:
+      //
+      // type: "voice"
+      //
+      // or no type at all.
+      //
+      // We force it to the actual incoming call type.
+      // ==========================================================
 
       if (
         pendingOfferRef.current
@@ -1241,12 +1497,50 @@ export function useCallManager(currentUser) {
         pendingOfferRef.current =
           null;
 
+        const queuedOfferType =
+          queuedOffer.type ===
+          "video"
+            ? "video"
+            : callType;
+
+        console.log("================================");
         console.log(
-          "PROCESSING QUEUED OFFER..."
+          "PROCESSING QUEUED OFFER"
         );
 
-        await handleOffer(
-          queuedOffer
+        console.log({
+          originalOfferType:
+            queuedOffer.type,
+
+          incomingCallType:
+            callType,
+
+          finalOfferType:
+            queuedOfferType,
+
+          callId:
+            queuedOffer.callId,
+        });
+
+        console.log("================================");
+
+        await handleOffer({
+          ...queuedOffer,
+
+          type:
+            queuedOfferType,
+
+          callId:
+            queuedOffer.callId ||
+            callId,
+
+          from:
+            queuedOffer.from ||
+            incoming.from,
+        });
+      } else {
+        console.log(
+          "NO QUEUED OFFER - WAITING FOR OFFER"
         );
       }
     } catch (err) {
@@ -1309,7 +1603,10 @@ export function useCallManager(currentUser) {
       false;
 
     setIncoming(null);
-    setStatus("idle");
+
+    setStatus(
+      "idle"
+    );
   };
 
   // ============================================================
@@ -1332,10 +1629,12 @@ export function useCallManager(currentUser) {
     console.log(
       "ENDING CALL"
     );
+
     console.log({
       remoteId,
       callId,
     });
+
     console.log("================================");
 
     if (remoteId) {
@@ -1363,16 +1662,19 @@ export function useCallManager(currentUser) {
       console.log(
         "NO AUDIO TRACK"
       );
+
       return;
     }
 
     const newMuted =
       !muted;
 
-    tracks.forEach((track) => {
-      track.enabled =
-        !newMuted;
-    });
+    tracks.forEach(
+      (track) => {
+        track.enabled =
+          !newMuted;
+      }
+    );
 
     setMuted(
       newMuted
@@ -1398,16 +1700,19 @@ export function useCallManager(currentUser) {
       console.log(
         "NO VIDEO TRACK"
       );
+
       return;
     }
 
     const newCameraOff =
       !cameraOff;
 
-    tracks.forEach((track) => {
-      track.enabled =
-        !newCameraOff;
-    });
+    tracks.forEach(
+      (track) => {
+        track.enabled =
+          !newCameraOff;
+      }
+    );
 
     setCameraOff(
       newCameraOff
@@ -1447,9 +1752,11 @@ export function useCallManager(currentUser) {
       console.log(
         "INCOMING CALL"
       );
+
       console.log(
         payload
       );
+
       console.log("================================");
 
       acceptedRef.current =
@@ -1492,21 +1799,73 @@ export function useCallManager(currentUser) {
         console.log(
           "WEBRTC OFFER RECEIVED"
         );
+
         console.log(
           payload
         );
+
         console.log("================================");
 
         if (!payload?.offer) {
           console.error(
             "OFFER IS MISSING"
           );
+
           return;
         }
 
-        // ------------------------------------------------------
+        // ======================================================
+        // NORMALIZE OFFER TYPE
+        //
+        // If backend sends type, use it.
+        //
+        // Otherwise use incoming.call.type.
+        //
+        // This prevents video becoming voice.
+        // ======================================================
+
+        const fallbackType =
+          incoming?.call?.type ||
+          call?.type ||
+          "voice";
+
+        const offerType =
+          payload.type === "video"
+            ? "video"
+            : fallbackType ===
+              "video"
+            ? "video"
+            : "voice";
+
+        const fixedPayload = {
+          ...payload,
+          type: offerType,
+        };
+
+        console.log("================================");
+        console.log(
+          "NORMALIZED OFFER"
+        );
+
+        console.log({
+          originalType:
+            payload.type,
+
+          incomingType:
+            incoming?.call?.type,
+
+          currentCallType:
+            call?.type,
+
+          finalType:
+            offerType,
+        });
+
+        console.log("================================");
+
+        // ======================================================
         // OFFER BEFORE ACCEPT
-        // ------------------------------------------------------
+        // ======================================================
 
         if (
           !acceptedRef.current
@@ -1516,16 +1875,20 @@ export function useCallManager(currentUser) {
           );
 
           pendingOfferRef.current =
-            payload;
+            fixedPayload;
 
-          if (payload.callId) {
+          if (
+            fixedPayload.callId
+          ) {
             currentCallIdRef.current =
-              payload.callId;
+              fixedPayload.callId;
           }
 
-          if (payload.from) {
+          if (
+            fixedPayload.from
+          ) {
             remoteUserRef.current =
-              payload.from;
+              fixedPayload.from;
           }
 
           console.log(
@@ -1535,16 +1898,16 @@ export function useCallManager(currentUser) {
           return;
         }
 
-        // ------------------------------------------------------
-        // ACCEPTED
-        // ------------------------------------------------------
+        // ======================================================
+        // CALL ALREADY ACCEPTED
+        // ======================================================
 
         console.log(
           "CALL ALREADY ACCEPTED"
         );
 
         await handleOffer(
-          payload
+          fixedPayload
         );
       } catch (err) {
         console.error(
@@ -1575,9 +1938,11 @@ export function useCallManager(currentUser) {
         console.log(
           "WEBRTC ANSWER RECEIVED"
         );
+
         console.log(
           payload
         );
+
         console.log("================================");
 
         const {
@@ -1589,6 +1954,7 @@ export function useCallManager(currentUser) {
           console.error(
             "ANSWER IS MISSING"
           );
+
           return;
         }
 
@@ -1599,6 +1965,7 @@ export function useCallManager(currentUser) {
           console.error(
             "NO PEER FOR ANSWER"
           );
+
           return;
         }
 
@@ -1631,9 +1998,9 @@ export function useCallManager(currentUser) {
           "ANSWER APPLIED SUCCESSFULLY"
         );
 
-        // ------------------------------------------------------
-        // QUEUED ICE
-        // ------------------------------------------------------
+        // ======================================================
+        // ADD QUEUED ICE
+        // ======================================================
 
         if (
           pendingCandidatesRef.current
@@ -1723,7 +2090,7 @@ export function useCallManager(currentUser) {
           peerRef.current;
 
         // ------------------------------------------------------
-        // WAIT UNTIL PEER + REMOTE DESCRIPTION READY
+        // QUEUE UNTIL REMOTE DESCRIPTION
         // ------------------------------------------------------
 
         if (
@@ -1787,7 +2154,7 @@ export function useCallManager(currentUser) {
     };
 
     // ==========================================================
-    // REGISTER EVENTS
+    // REGISTER SOCKET EVENTS
     // ==========================================================
 
     socket.on(
@@ -1859,6 +2226,8 @@ export function useCallManager(currentUser) {
     currentUser,
     closeMedia,
     handleOffer,
+    incoming,
+    call,
   ]);
 
   // ============================================================
@@ -1883,7 +2252,9 @@ export function useCallManager(currentUser) {
     video.autoplay = true;
     video.playsInline = true;
 
-    video.play().catch(() => {});
+    video.play().catch(
+      () => {}
+    );
   }, [
     localStream,
     cameraOff,
@@ -1905,14 +2276,34 @@ export function useCallManager(currentUser) {
       "RE-ATTACHING REMOTE STREAM"
     );
 
+    console.log(
+      "REMOTE TRACKS:",
+      stream
+        .getTracks()
+        .map(
+          (track) =>
+            track.kind
+        )
+    );
+
+    // ----------------------------------------------------------
+    // REMOTE VIDEO
+    // ----------------------------------------------------------
+
     if (remoteVideoRef.current) {
       remoteVideoRef.current.srcObject =
         stream;
 
       remoteVideoRef.current
         .play()
-        .catch(() => {});
+        .catch(
+          () => {}
+        );
     }
+
+    // ----------------------------------------------------------
+    // REMOTE AUDIO
+    // ----------------------------------------------------------
 
     if (remoteAudioRef.current) {
       remoteAudioRef.current.srcObject =
@@ -1926,7 +2317,9 @@ export function useCallManager(currentUser) {
 
       remoteAudioRef.current
         .play()
-        .catch(() => {});
+        .catch(
+          () => {}
+        );
     }
   }, [
     status,
