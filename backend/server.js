@@ -1,5 +1,4 @@
-const https = require("https");
-const fs = require("fs");
+const http = require("http");
 const { Server } = require("socket.io");
 
 const app = require("./app");
@@ -10,17 +9,15 @@ const registerSockets = require("./sockets");
 async function start() {
   await connectDB();
 
-  const httpsOptions = {
-    key: fs.readFileSync("./10.15.141.0+2-key.pem"),
-    cert: fs.readFileSync("./10.15.141.0+2.pem"),
-  };
-
-  const server = https.createServer(httpsOptions, app);
+  // Render handles HTTPS.
+  // Locally, you can use http://localhost:5002.
+  const server = http.createServer(app);
 
   const io = new Server(server, {
     cors: {
-      origin: "https://localhost:5173",
+      origin: env.clientUrl,
       credentials: true,
+      methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     },
   });
 
@@ -29,7 +26,7 @@ async function start() {
   registerSockets(io);
 
   server.listen(env.port, "0.0.0.0", () => {
-    console.log(`Aurora API listening on https://localhost:${env.port}`);
+    console.log(`Aurora API listening on port ${env.port}`);
   });
 }
 
