@@ -1,6 +1,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getSocket } from "../services/socket";
+import { getSocket } from "../socket/client";
 
 const ICE_SERVERS = {
   iceServers: [
