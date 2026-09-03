@@ -1,4 +1,3 @@
-
 import { useEffect } from "react";
 
 import {
@@ -15,6 +14,8 @@ import Avatar from "./Avatar.jsx";
 export default function CallOverlay({ manager }) {
   const {
     incoming,
+    call,
+
     status,
     muted,
     cameraOff,
@@ -34,103 +35,241 @@ export default function CallOverlay({ manager }) {
 
   /*
   |--------------------------------------------------------------------------
-  | Attach local stream
+  | CALL DATA
   |--------------------------------------------------------------------------
   */
 
-  useEffect(() => {
-    if (!localVideoRef?.current || !localStream) {
-      return;
-    }
+  /*
+   * Incoming call:
+   * incoming.from
+   *
+   * Active call:
+   * call
+   *
+   * This fixes the problem where caller side had no caller data.
+   */
 
-    localVideoRef.current.srcObject = localStream;
-    localVideoRef.current.muted = true;
-    localVideoRef.current.autoplay = true;
-    localVideoRef.current.playsInline = true;
+  const caller =
+    incoming?.from ||
+    call?.from ||
+    call?.user ||
+    call?.caller ||
+    null;
 
-    localVideoRef.current.play().catch(() => {});
-  }, [localStream, localVideoRef]);
+  const callerName =
+    caller?.name ||
+    caller?.username ||
+    caller?.phone ||
+    call?.name ||
+    call?.username ||
+    "Aurora Contact";
+
+  const callerAvatar =
+    caller?.avatar ||
+    caller?.profilePicture ||
+    caller?.image ||
+    call?.avatar ||
+    call?.profilePicture ||
+    call?.image ||
+    null;
 
   /*
   |--------------------------------------------------------------------------
-  | Make sure remote audio is playing
+  | CALL TYPE
   |--------------------------------------------------------------------------
   */
 
-  useEffect(() => {
-    const audio = remoteAudioRef?.current;
+  const callType =
+    incoming?.call?.type ||
+    incoming?.type ||
+    incoming?.video
+      ? "video"
+      : call?.call?.type ||
+        call?.type ||
+        call?.video
+        ? "video"
+        : manager?.callType ||
+          "voice";
 
-    if (!audio) {
-      return;
-    }
-
-    audio.autoplay = true;
-    audio.muted = false;
-    audio.volume = 1;
-    audio.playsInline = true;
-
-    if (audio.srcObject) {
-      audio.play().catch((error) => {
-        console.warn(
-          "Remote audio autoplay blocked:",
-          error
-        );
-      });
-    }
-  }, [remoteAudioRef, status]);
+  const isVideoCall =
+    callType === "video";
 
   /*
   |--------------------------------------------------------------------------
-  | Make sure remote video is playing
+  | AVATAR USER
+  |--------------------------------------------------------------------------
+  */
+
+  const avatarUser =
+    caller || {
+      name: callerName,
+      avatar: callerAvatar,
+    };
+
+  /*
+  |--------------------------------------------------------------------------
+  | ATTACH LOCAL STREAM
   |--------------------------------------------------------------------------
   */
 
   useEffect(() => {
-    const video = remoteVideoRef?.current;
+    const video =
+      localVideoRef?.current;
 
     if (!video) {
       return;
     }
 
+    if (!localStream) {
+      video.srcObject = null;
+      return;
+    }
+
+    console.log(
+      "📹 CallOverlay: attaching local stream"
+    );
+
+    video.srcObject = localStream;
+
     video.autoplay = true;
     video.playsInline = true;
-    video.muted = false;
-    video.volume = 1;
+    video.muted = true;
 
-    if (video.srcObject) {
-      video.play().catch((error) => {
-        console.warn(
-          "Remote video autoplay blocked:",
-          error
-        );
-      });
-    }
-  }, [remoteVideoRef, status]);
+    video.play().catch((error) => {
+      console.warn(
+        "Local video play blocked:",
+        error
+      );
+    });
+
+    return () => {
+      /*
+       * Don't stop the stream here.
+       * useCallManager owns the stream.
+       */
+    };
+  }, [
+    localStream,
+    localVideoRef,
+  ]);
 
   /*
   |--------------------------------------------------------------------------
-  | Nothing active
+  | REMOTE AUDIO
   |--------------------------------------------------------------------------
   */
 
-  if (!incoming && status === "idle") {
+  useEffect(() => {
+    const audio =
+      remoteAudioRef?.current;
+
+    if (!audio) {
+      return;
+    }
+
+    console.log(
+      "🔊 CallOverlay: preparing remote audio"
+    );
+
+    audio.autoplay = true;
+    audio.playsInline = true;
+    audio.controls = false;
+    audio.muted = false;
+    audio.volume = 1;
+
+    if (audio.srcObject) {
+      audio
+        .play()
+        .then(() => {
+          console.log(
+            "🔊 Remote audio playing"
+          );
+        })
+        .catch((error) => {
+          console.warn(
+            "⚠️ Remote audio autoplay blocked:",
+            error
+          );
+        });
+    }
+  }, [
+    remoteAudioRef,
+    call,
+    status,
+  ]);
+
+  /*
+  |--------------------------------------------------------------------------
+  | REMOTE VIDEO
+  |--------------------------------------------------------------------------
+  */
+
+  useEffect(() => {
+    const video =
+      remoteVideoRef?.current;
+
+    if (!video) {
+      return;
+    }
+
+    console.log(
+      "📹 CallOverlay: preparing remote video"
+    );
+
+    video.autoplay = true;
+    video.playsInline = true;
+
+    /*
+     * IMPORTANT:
+     *
+     * Remote audio is handled by <audio>.
+     * Therefore remote video MUST stay muted.
+     *
+     * Otherwise:
+     *
+     * remote video audio
+     * +
+     * remote audio element
+     *
+     * = duplicate sound / echo.
+     */
+
+    video.muted = true;
+
+    if (video.srcObject) {
+      video
+        .play()
+        .then(() => {
+          console.log(
+            "📹 Remote video playing"
+          );
+        })
+        .catch((error) => {
+          console.warn(
+            "⚠️ Remote video autoplay blocked:",
+            error
+          );
+        });
+    }
+  }, [
+    remoteVideoRef,
+    call,
+    status,
+  ]);
+
+  /*
+  |--------------------------------------------------------------------------
+  | NOTHING ACTIVE
+  |--------------------------------------------------------------------------
+  */
+
+  if (
+    !incoming &&
+    !call &&
+    status === "idle"
+  ) {
     return null;
   }
-
-  const callType =
-    incoming?.call?.type ||
-    manager?.call?.type ||
-    manager?.callType ||
-    "voice";
-
-  const isVideoCall = callType === "video";
-
-  const caller = incoming?.from;
-
-  const callerName =
-    caller?.name ||
-    caller?.phone ||
-    "Aurora Contact";
 
   /*
   |--------------------------------------------------------------------------
@@ -138,7 +277,7 @@ export default function CallOverlay({ manager }) {
   |--------------------------------------------------------------------------
   */
 
-  if (incoming) {
+  if (incoming && !call) {
     return (
       <section
         className="call-overlay incoming-call-overlay"
@@ -151,7 +290,7 @@ export default function CallOverlay({ manager }) {
           <div className="incoming-caller">
 
             <div className="incoming-avatar">
-              <Avatar user={caller} />
+              <Avatar user={avatarUser} />
             </div>
 
             <p className="incoming-call-label">
@@ -162,7 +301,9 @@ export default function CallOverlay({ manager }) {
               call
             </p>
 
-            <h1>{callerName}</h1>
+            <h1>
+              {callerName}
+            </h1>
 
             {caller?.phone &&
               caller?.name && (
@@ -276,7 +417,13 @@ export default function CallOverlay({ manager }) {
                 ref={remoteVideoRef}
                 autoPlay
                 playsInline
-                muted={false}
+
+                /*
+                 * IMPORTANT:
+                 * Audio comes from remoteAudioRef.
+                 */
+                muted
+
                 className="remote-video"
               />
 
@@ -284,7 +431,9 @@ export default function CallOverlay({ manager }) {
                 <div className="video-call-waiting">
 
                   <div className="video-waiting-avatar">
-                    <Avatar user={caller} />
+                    <Avatar
+                      user={avatarUser}
+                    />
                   </div>
 
                   <h2>
@@ -294,7 +443,11 @@ export default function CallOverlay({ manager }) {
                   <p>
                     {status === "calling"
                       ? "Calling..."
-                      : status}
+                      : status === "ringing"
+                        ? "Ringing..."
+                        : status === "connecting"
+                          ? "Connecting..."
+                          : status}
                   </p>
 
                 </div>
@@ -324,7 +477,9 @@ export default function CallOverlay({ manager }) {
 
                   <div className="camera-off-avatar">
                     <Avatar
-                      user={manager?.user}
+                      user={
+                        manager?.user
+                      }
                     />
                   </div>
 
@@ -340,7 +495,9 @@ export default function CallOverlay({ manager }) {
 
               <div className="active-call-person">
 
-                <Avatar user={caller} />
+                <Avatar
+                  user={avatarUser}
+                />
 
                 <div>
 
@@ -353,7 +510,9 @@ export default function CallOverlay({ manager }) {
                       ? "Calling..."
                       : status === "connected"
                         ? "Connected"
-                        : status}
+                        : status === "ringing"
+                          ? "Ringing..."
+                          : status}
                   </span>
 
                 </div>
@@ -372,7 +531,9 @@ export default function CallOverlay({ manager }) {
             <div className="voice-call-content">
 
               <div className="voice-call-avatar">
-                <Avatar user={caller} />
+                <Avatar
+                  user={avatarUser}
+                />
               </div>
 
               <h1>
@@ -384,7 +545,9 @@ export default function CallOverlay({ manager }) {
                   ? "Calling..."
                   : status === "connected"
                     ? "Connected"
-                    : status}
+                    : status === "ringing"
+                      ? "Ringing..."
+                      : status}
               </p>
 
               {caller?.phone && (
@@ -512,4 +675,3 @@ export default function CallOverlay({ manager }) {
     </section>
   );
 }
-
