@@ -1,4 +1,3 @@
-
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getSocket } from "../socket/client";
 
@@ -15,7 +14,6 @@ export function useCallManager(currentUser) {
 
   const [call, setCall] = useState(null);
   const [incoming, setIncoming] = useState(null);
-
   const [status, setStatus] = useState("idle");
 
   const [muted, setMuted] = useState(false);
@@ -23,8 +21,6 @@ export function useCallManager(currentUser) {
 
   const [error, setError] = useState("");
 
-  // IMPORTANT:
-  // CallOverlay ko localStream directly dene ke liye state
   const [localStream, setLocalStream] = useState(null);
 
   // ==================================================
@@ -33,9 +29,6 @@ export function useCallManager(currentUser) {
 
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
-
-  // IMPORTANT:
-  // Remote audio isi element mein attach hoga
   const remoteAudioRef = useRef(null);
 
   const peerRef = useRef(null);
@@ -47,17 +40,13 @@ export function useCallManager(currentUser) {
 
   const currentCallIdRef = useRef(null);
 
-  // ICE candidates received before remote description
   const pendingCandidatesRef = useRef([]);
-
-  // Offer received before receiver clicks Accept
   const pendingOfferRef = useRef(null);
 
-  // Receiver has clicked Accept
   const acceptedRef = useRef(false);
 
   // ==================================================
-  // CLOSE MEDIA / PEER
+  // CLOSE CALL
   // ==================================================
 
   const closeMedia = useCallback(() => {
@@ -66,7 +55,7 @@ export function useCallManager(currentUser) {
     console.log("================================");
 
     // ----------------------------------------------
-    // Close peer
+    // CLOSE PEER
     // ----------------------------------------------
 
     try {
@@ -85,7 +74,7 @@ export function useCallManager(currentUser) {
     peerRef.current = null;
 
     // ----------------------------------------------
-    // Stop local media
+    // STOP LOCAL MEDIA
     // ----------------------------------------------
 
     if (localStreamRef.current) {
@@ -99,10 +88,11 @@ export function useCallManager(currentUser) {
     }
 
     localStreamRef.current = null;
+
     setLocalStream(null);
 
     // ----------------------------------------------
-    // Clear local video
+    // CLEAR LOCAL VIDEO
     // ----------------------------------------------
 
     if (localVideoRef.current) {
@@ -110,7 +100,7 @@ export function useCallManager(currentUser) {
     }
 
     // ----------------------------------------------
-    // Clear remote video
+    // CLEAR REMOTE VIDEO
     // ----------------------------------------------
 
     if (remoteVideoRef.current) {
@@ -118,7 +108,7 @@ export function useCallManager(currentUser) {
     }
 
     // ----------------------------------------------
-    // Clear remote audio
+    // CLEAR REMOTE AUDIO
     // ----------------------------------------------
 
     if (remoteAudioRef.current) {
@@ -134,7 +124,7 @@ export function useCallManager(currentUser) {
     remoteStreamRef.current = null;
 
     // ----------------------------------------------
-    // Reset refs
+    // RESET REFS
     // ----------------------------------------------
 
     remoteUserRef.current = null;
@@ -146,7 +136,7 @@ export function useCallManager(currentUser) {
     acceptedRef.current = false;
 
     // ----------------------------------------------
-    // Reset state
+    // RESET STATE
     // ----------------------------------------------
 
     setStatus("idle");
@@ -158,7 +148,7 @@ export function useCallManager(currentUser) {
   }, []);
 
   // ==================================================
-  // GET MICROPHONE / CAMERA
+  // GET MEDIA
   // ==================================================
 
   const getMedia = useCallback(async (type = "voice") => {
@@ -221,16 +211,9 @@ export function useCallManager(currentUser) {
         }))
       );
 
-      // Save in ref
       localStreamRef.current = stream;
 
-      // IMPORTANT:
-      // Save in state so React UI gets the stream
       setLocalStream(stream);
-
-      // ----------------------------------------------
-      // Local video
-      // ----------------------------------------------
 
       if (type === "video" && localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
@@ -294,9 +277,9 @@ export function useCallManager(currentUser) {
 
     remoteStreamRef.current = stream;
 
-    // =================================================
+    // ----------------------------------------------
     // REMOTE VIDEO
-    // =================================================
+    // ----------------------------------------------
 
     if (remoteVideoRef.current) {
       remoteVideoRef.current.srcObject = stream;
@@ -311,9 +294,9 @@ export function useCallManager(currentUser) {
         });
     }
 
-    // =================================================
+    // ----------------------------------------------
     // REMOTE AUDIO
-    // =================================================
+    // ----------------------------------------------
 
     if (remoteAudioRef.current) {
       remoteAudioRef.current.srcObject = stream;
@@ -335,14 +318,27 @@ export function useCallManager(currentUser) {
   }, []);
 
   // ==================================================
-  // CREATE PEER CONNECTION
+  // CREATE PEER
   // ==================================================
 
   const createPeer = useCallback(
-    (targetUserId, callId = null) => {
+    (targetUserId, callId) => {
       const socket = getSocket();
 
-      // If an old peer exists, close it first
+      if (!targetUserId) {
+        throw new Error("Target user ID is missing.");
+      }
+
+      if (!callId) {
+        throw new Error(
+          "Call ID is missing. Cannot create WebRTC peer."
+        );
+      }
+
+      // ----------------------------------------------
+      // CLOSE OLD PEER
+      // ----------------------------------------------
+
       if (peerRef.current) {
         try {
           peerRef.current.close();
@@ -365,35 +361,28 @@ export function useCallManager(currentUser) {
         iceServers,
       });
 
-      // =================================================
-      // ICE CANDIDATE
-      // =================================================
+      // ----------------------------------------------
+      // ICE
+      // ----------------------------------------------
 
       peer.onicecandidate = (event) => {
         if (!event.candidate) return;
 
-        console.log(
-          "SENDING ICE CANDIDATE"
-        );
+        const activeCallId =
+          callId || currentCallIdRef.current;
 
-        socket?.emit(
-          "webrtc:ice-candidate",
-          {
-            to: targetUserId,
+        console.log("SENDING ICE CANDIDATE");
 
-            candidate:
-              event.candidate,
-
-            callId:
-              callId ||
-              currentCallIdRef.current,
-          }
-        );
+        socket?.emit("webrtc:ice-candidate", {
+          to: targetUserId,
+          callId: activeCallId,
+          candidate: event.candidate,
+        });
       };
 
-      // =================================================
+      // ----------------------------------------------
       // REMOTE TRACK
-      // =================================================
+      // ----------------------------------------------
 
       peer.ontrack = (event) => {
         console.log("================================");
@@ -403,17 +392,11 @@ export function useCallManager(currentUser) {
         );
         console.log("================================");
 
-        let stream =
-          event.streams?.[0];
-
-        // ----------------------------------------------
-        // Fallback MediaStream
-        // ----------------------------------------------
+        let stream = event.streams?.[0];
 
         if (!stream) {
           if (!remoteStreamRef.current) {
-            remoteStreamRef.current =
-              new MediaStream();
+            remoteStreamRef.current = new MediaStream();
           }
 
           const exists =
@@ -421,8 +404,7 @@ export function useCallManager(currentUser) {
               .getTracks()
               .some(
                 (track) =>
-                  track.id ===
-                  event.track.id
+                  track.id === event.track.id
               );
 
           if (!exists) {
@@ -431,20 +413,15 @@ export function useCallManager(currentUser) {
             );
           }
 
-          stream =
-            remoteStreamRef.current;
+          stream = remoteStreamRef.current;
         }
-
-        // ----------------------------------------------
-        // Attach BOTH audio + video
-        // ----------------------------------------------
 
         attachRemoteStream(stream);
       };
 
-      // =================================================
+      // ----------------------------------------------
       // CONNECTION STATE
-      // =================================================
+      // ----------------------------------------------
 
       peer.onconnectionstatechange = () => {
         console.log(
@@ -454,15 +431,9 @@ export function useCallManager(currentUser) {
 
         switch (peer.connectionState) {
           case "connected":
-            console.log(
-              "================================"
-            );
-            console.log(
-              "CALL CONNECTED"
-            );
-            console.log(
-              "================================"
-            );
+            console.log("================================");
+            console.log("CALL CONNECTED");
+            console.log("================================");
 
             setStatus("connected");
             break;
@@ -472,9 +443,7 @@ export function useCallManager(currentUser) {
             break;
 
           case "disconnected":
-            console.log(
-              "WebRTC disconnected"
-            );
+            console.log("WebRTC disconnected");
             break;
 
           case "failed":
@@ -500,26 +469,25 @@ export function useCallManager(currentUser) {
         }
       };
 
-      // =================================================
+      // ----------------------------------------------
       // ICE CONNECTION STATE
-      // =================================================
+      // ----------------------------------------------
 
-      peer.oniceconnectionstatechange =
-        () => {
-          console.log(
-            "ICE CONNECTION:",
-            peer.iceConnectionState
+      peer.oniceconnectionstatechange = () => {
+        console.log(
+          "ICE CONNECTION:",
+          peer.iceConnectionState
+        );
+
+        if (
+          peer.iceConnectionState ===
+          "failed"
+        ) {
+          console.error(
+            "ICE CONNECTION FAILED"
           );
-
-          if (
-            peer.iceConnectionState ===
-            "failed"
-          ) {
-            console.error(
-              "ICE CONNECTION FAILED"
-            );
-          }
-        };
+        }
+      };
 
       peerRef.current = peer;
 
@@ -549,14 +517,31 @@ export function useCallManager(currentUser) {
         });
         console.log("================================");
 
+        if (!offer) {
+          throw new Error(
+            "WebRTC offer is missing."
+          );
+        }
+
+        if (!from) {
+          throw new Error(
+            "Caller ID is missing."
+          );
+        }
+
+        if (!callId) {
+          throw new Error(
+            "Call ID is missing from offer."
+          );
+        }
+
         remoteUserRef.current = from;
 
-        currentCallIdRef.current =
-          callId;
+        currentCallIdRef.current = callId;
 
-        // =================================================
-        // GET RECEIVER MEDIA
-        // =================================================
+        // ----------------------------------------------
+        // RECEIVER MEDIA
+        // ----------------------------------------------
 
         console.log(
           "Receiver requesting microphone/camera..."
@@ -565,19 +550,18 @@ export function useCallManager(currentUser) {
         const stream =
           await getMedia(type);
 
-        // =================================================
+        // ----------------------------------------------
         // CREATE RECEIVER PEER
-        // =================================================
+        // ----------------------------------------------
 
-        const peer =
-          createPeer(
-            from,
-            callId
-          );
+        const peer = createPeer(
+          from,
+          callId
+        );
 
-        // =================================================
-        // ADD RECEIVER AUDIO + VIDEO TRACKS
-        // =================================================
+        // ----------------------------------------------
+        // ADD RECEIVER TRACKS
+        // ----------------------------------------------
 
         stream
           .getTracks()
@@ -593,27 +577,25 @@ export function useCallManager(currentUser) {
             );
           });
 
-        // =================================================
-        // SET CALLER OFFER
-        // =================================================
+        // ----------------------------------------------
+        // SET REMOTE DESCRIPTION
+        // ----------------------------------------------
 
         console.log(
           "SETTING REMOTE DESCRIPTION..."
         );
 
         await peer.setRemoteDescription(
-          new RTCSessionDescription(
-            offer
-          )
+          new RTCSessionDescription(offer)
         );
 
         console.log(
           "REMOTE DESCRIPTION SET"
         );
 
-        // =================================================
+        // ----------------------------------------------
         // ADD QUEUED ICE
-        // =================================================
+        // ----------------------------------------------
 
         if (
           pendingCandidatesRef.current
@@ -642,13 +624,12 @@ export function useCallManager(currentUser) {
             }
           }
 
-          pendingCandidatesRef.current =
-            [];
+          pendingCandidatesRef.current = [];
         }
 
-        // =================================================
+        // ----------------------------------------------
         // CREATE ANSWER
-        // =================================================
+        // ----------------------------------------------
 
         console.log(
           "CREATING ANSWER..."
@@ -661,9 +642,11 @@ export function useCallManager(currentUser) {
           answer
         );
 
-        // =================================================
+        // ----------------------------------------------
         // SEND ANSWER
-        // =================================================
+        // ----------------------------------------------
+
+        const socket = getSocket();
 
         console.log(
           "SENDING ANSWER..."
@@ -673,19 +656,21 @@ export function useCallManager(currentUser) {
           "webrtc:answer",
           {
             to: from,
-            answer,
             callId,
+            answer,
           }
         );
 
-        // =================================================
-        // UPDATE STATE
-        // =================================================
+        console.log(
+          "ANSWER SENT SUCCESSFULLY"
+        );
+
+        // ----------------------------------------------
+        // STATE
+        // ----------------------------------------------
 
         setCall((existing) => {
-          if (existing) {
-            return existing;
-          }
+          if (existing) return existing;
 
           return {
             _id: callId,
@@ -696,10 +681,6 @@ export function useCallManager(currentUser) {
         setStatus("connecting");
 
         setIncoming(null);
-
-        console.log(
-          "ANSWER SENT SUCCESSFULLY"
-        );
       } catch (err) {
         console.error(
           "HANDLE OFFER FAILED:",
@@ -754,56 +735,38 @@ export function useCallManager(currentUser) {
       });
       console.log("================================");
 
-      // =================================================
+      // ----------------------------------------------
       // SAVE REMOTE USER
-      // =================================================
+      // ----------------------------------------------
 
       remoteUserRef.current =
-        receiver._id;
+        receiver;
 
-      // =================================================
+      // ----------------------------------------------
       // GET CALLER MEDIA
-      // =================================================
+      // ----------------------------------------------
 
       const stream =
         await getMedia(type);
 
       // =================================================
-      // CREATE CALLER PEER
+      // IMPORTANT FIX:
+      //
+      // CALL INITIATE FIRST
+      // THEN CREATE PEER.
+      //
+      // Previously peer was created here before ACK,
+      // causing callId = null.
       // =================================================
 
-      const peer =
-        createPeer(
-          receiver._id
-        );
-
-      // =================================================
-      // ADD CALLER AUDIO + VIDEO
-      // =================================================
-
-      stream
-        .getTracks()
-        .forEach((track) => {
-          console.log(
-            "ADDING CALLER TRACK:",
-            track.kind
-          );
-
-          peer.addTrack(
-            track,
-            stream
-          );
-        });
-
-      // =================================================
-      // INITIATE CALL
-      // =================================================
+      console.log(
+        "INITIATING CALL ON SERVER..."
+      );
 
       socket.emit(
         "call:initiate",
         {
-          receiver:
-            receiver._id,
+          receiver: receiver._id,
 
           participants: [
             receiver._id,
@@ -813,7 +776,6 @@ export function useCallManager(currentUser) {
 
           conversationId,
         },
-
         async (ack) => {
           try {
             console.log(
@@ -829,23 +791,83 @@ export function useCallManager(currentUser) {
                   "Could not start call."
               );
 
+              // Stop media if call creation failed
+              stream
+                .getTracks()
+                .forEach((track) =>
+                  track.stop()
+                );
+
+              localStreamRef.current =
+                null;
+
+              setLocalStream(null);
+
               return;
             }
 
-            // --------------------------------------------
-            // Save call
-            // --------------------------------------------
+            // ------------------------------------------
+            // GET REAL CALL ID
+            // ------------------------------------------
+
+            const callId =
+              ack.call?._id;
+
+            if (!callId) {
+              throw new Error(
+                "Server did not return a call ID."
+              );
+            }
+
+            currentCallIdRef.current =
+              callId;
 
             setCall(ack.call);
 
-            currentCallIdRef.current =
-              ack.call._id;
-
             setStatus("calling");
 
-            // --------------------------------------------
-            // Create OFFER
-            // --------------------------------------------
+            console.log(
+              "================================"
+            );
+            console.log(
+              "CALL ID:",
+              callId
+            );
+            console.log(
+              "================================"
+            );
+
+            // ------------------------------------------
+            // CREATE PEER ONLY AFTER CALL ID
+            // ------------------------------------------
+
+            const peer =
+              createPeer(
+                receiver._id,
+                callId
+              );
+
+            // ------------------------------------------
+            // ADD CALLER TRACKS
+            // ------------------------------------------
+
+            stream
+              .getTracks()
+              .forEach((track) => {
+                console.log(
+                  "ADDING CALLER TRACK:",
+                  track.kind
+                );
+
+                peer.addTrack(
+                  track,
+                  stream
+                );
+              });
+
+            // ------------------------------------------
+            // CREATE OFFER
+            // ------------------------------------------
 
             console.log(
               "CREATING OFFER..."
@@ -858,9 +880,9 @@ export function useCallManager(currentUser) {
               offer
             );
 
-            // --------------------------------------------
-            // Send OFFER
-            // --------------------------------------------
+            // ------------------------------------------
+            // SEND OFFER
+            // ------------------------------------------
 
             console.log(
               "SENDING OFFER..."
@@ -870,12 +892,8 @@ export function useCallManager(currentUser) {
               "webrtc:offer",
               {
                 to: receiver._id,
-
+                callId,
                 offer,
-
-                callId:
-                  ack.call._id,
-
                 type,
               }
             );
@@ -892,7 +910,8 @@ export function useCallManager(currentUser) {
             setStatus("failed");
 
             setError(
-              "Could not establish the call."
+              err.message ||
+                "Could not establish the call."
             );
           }
         }
@@ -941,6 +960,18 @@ export function useCallManager(currentUser) {
       const callId =
         incoming.call?._id;
 
+      if (!remoteId) {
+        throw new Error(
+          "Caller information is missing."
+        );
+      }
+
+      if (!callId) {
+        throw new Error(
+          "Call ID is missing."
+        );
+      }
+
       console.log("================================");
       console.log("ACCEPTING CALL");
       console.log({
@@ -950,12 +981,9 @@ export function useCallManager(currentUser) {
       });
       console.log("================================");
 
-      // =================================================
-      // IMPORTANT
-      // =================================================
-      // Ab receiver ne Accept click kiya hai.
-      // Ab offer process ho sakta hai.
-      // =================================================
+      // ----------------------------------------------
+      // NOW ACCEPTED
+      // ----------------------------------------------
 
       acceptedRef.current = true;
 
@@ -969,12 +997,11 @@ export function useCallManager(currentUser) {
 
       setStatus("connecting");
 
-      // Remove incoming UI
       setIncoming(null);
 
-      // =================================================
-      // TELL SERVER CALL ACCEPTED
-      // =================================================
+      // ----------------------------------------------
+      // TELL SERVER
+      // ----------------------------------------------
 
       socket.emit(
         "call:accept",
@@ -988,10 +1015,9 @@ export function useCallManager(currentUser) {
         "CALL ACCEPT SENT"
       );
 
-      // =================================================
-      // IF OFFER ARRIVED BEFORE ACCEPT
-      // PROCESS IT NOW
-      // =================================================
+      // ----------------------------------------------
+      // PROCESS QUEUED OFFER
+      // ----------------------------------------------
 
       if (pendingOfferRef.current) {
         const pendingOffer =
@@ -1045,13 +1071,15 @@ export function useCallManager(currentUser) {
       }
     );
 
-    socket?.emit(
-      "call:reject",
-      {
-        to: remoteId,
-        callId,
-      }
-    );
+    if (remoteId) {
+      socket?.emit(
+        "call:reject",
+        {
+          to: remoteId,
+          callId,
+        }
+      );
+    }
 
     pendingOfferRef.current = null;
 
@@ -1068,19 +1096,27 @@ export function useCallManager(currentUser) {
   const endCall = () => {
     const socket = getSocket();
 
+    const remoteId =
+      remoteUserRef.current?._id ||
+      remoteUserRef.current;
+
+    const callId =
+      call?._id ||
+      currentCallIdRef.current;
+
     console.log(
-      "ENDING CALL"
+      "ENDING CALL",
+      {
+        remoteId,
+        callId,
+      }
     );
 
     socket?.emit(
       "call:end",
       {
-        to:
-          remoteUserRef.current,
-
-        callId:
-          call?._id ||
-          currentCallIdRef.current,
+        to: remoteId,
+        callId,
       }
     );
 
@@ -1102,21 +1138,17 @@ export function useCallManager(currentUser) {
       return;
     }
 
-    const newMuted =
-      !muted;
+    const newMuted = !muted;
 
     tracks.forEach((track) => {
-      track.enabled =
-        !newMuted;
+      track.enabled = !newMuted;
     });
 
     setMuted(newMuted);
 
     console.log(
       "MICROPHONE:",
-      newMuted
-        ? "OFF"
-        : "ON"
+      newMuted ? "OFF" : "ON"
     );
   };
 
@@ -1139,19 +1171,14 @@ export function useCallManager(currentUser) {
       !cameraOff;
 
     tracks.forEach((track) => {
-      track.enabled =
-        !newCameraOff;
+      track.enabled = !newCameraOff;
     });
 
-    setCameraOff(
-      newCameraOff
-    );
+    setCameraOff(newCameraOff);
 
     console.log(
       "CAMERA:",
-      newCameraOff
-        ? "OFF"
-        : "ON"
+      newCameraOff ? "OFF" : "ON"
     );
   };
 
@@ -1180,6 +1207,8 @@ export function useCallManager(currentUser) {
 
       pendingOfferRef.current = null;
 
+      pendingCandidatesRef.current = [];
+
       setIncoming(payload);
 
       setStatus("ringing");
@@ -1196,13 +1225,16 @@ export function useCallManager(currentUser) {
         console.log(payload);
         console.log("================================");
 
-        // =================================================
-        // IMPORTANT
-        //
-        // Receiver ne Accept nahi kiya?
-        // Media access nahi karenge.
-        // Offer queue kar denge.
-        // =================================================
+        if (!payload?.offer) {
+          console.error(
+            "Offer payload missing offer."
+          );
+          return;
+        }
+
+        // ----------------------------------------------
+        // NOT ACCEPTED
+        // ----------------------------------------------
 
         if (!acceptedRef.current) {
           console.log(
@@ -1212,12 +1244,26 @@ export function useCallManager(currentUser) {
           pendingOfferRef.current =
             payload;
 
+          // Save call ID
+          if (payload.callId) {
+            currentCallIdRef.current =
+              payload.callId;
+          }
+
+          // Save caller
+          if (payload.from) {
+            remoteUserRef.current =
+              payload.from;
+          }
+
           return;
         }
 
-        await handleOffer(
-          payload
-        );
+        // ----------------------------------------------
+        // ACCEPTED
+        // ----------------------------------------------
+
+        await handleOffer(payload);
       } catch (err) {
         console.error(
           "Offer event failed:",
@@ -1237,30 +1283,50 @@ export function useCallManager(currentUser) {
     // ANSWER
     // =================================================
 
-    const onAnswer = async ({
-      answer,
-      callId,
-    }) => {
+    const onAnswer = async (payload) => {
       try {
+        const {
+          answer,
+          callId,
+        } = payload || {};
+
+        console.log("================================");
+        console.log("WEBRTC ANSWER RECEIVED");
+        console.log({
+          callId,
+          from: payload?.from,
+        });
+        console.log("================================");
+
+        if (!answer) {
+          console.error(
+            "Answer is missing."
+          );
+          return;
+        }
+
         const peer =
           peerRef.current;
 
         if (!peer) {
           console.error(
-            "No peer found for answer"
+            "No peer found for answer."
           );
           return;
         }
 
-        console.log(
-          "================================"
-        );
-        console.log(
-          "WEBRTC ANSWER RECEIVED"
-        );
-        console.log(
-          "================================"
-        );
+        // ----------------------------------------------
+        // SET CALL ID
+        // ----------------------------------------------
+
+        if (callId) {
+          currentCallIdRef.current =
+            callId;
+        }
+
+        // ----------------------------------------------
+        // SET REMOTE DESCRIPTION
+        // ----------------------------------------------
 
         await peer.setRemoteDescription(
           new RTCSessionDescription(
@@ -1268,9 +1334,13 @@ export function useCallManager(currentUser) {
           )
         );
 
-        // =================================================
+        console.log(
+          "ANSWER APPLIED SUCCESSFULLY"
+        );
+
+        // ----------------------------------------------
         // ADD QUEUED ICE
-        // =================================================
+        // ----------------------------------------------
 
         if (
           pendingCandidatesRef.current
@@ -1299,18 +1369,8 @@ export function useCallManager(currentUser) {
             }
           }
 
-          pendingCandidatesRef.current =
-            [];
+          pendingCandidatesRef.current = [];
         }
-
-        if (callId) {
-          currentCallIdRef.current =
-            callId;
-        }
-
-        console.log(
-          "ANSWER APPLIED SUCCESSFULLY"
-        );
 
         setStatus("connecting");
       } catch (err) {
@@ -1331,17 +1391,19 @@ export function useCallManager(currentUser) {
     // ICE CANDIDATE
     // =================================================
 
-    const onCandidate = async ({
-      candidate,
-      callId,
-    }) => {
+    const onCandidate = async (payload) => {
       try {
+        const {
+          candidate,
+          callId,
+        } = payload || {};
+
         if (!candidate) return;
 
-        const peer =
-          peerRef.current;
+        console.log(
+          "RECEIVED ICE CANDIDATE"
+        );
 
-        // Save call ID
         if (
           callId &&
           !currentCallIdRef.current
@@ -1350,9 +1412,12 @@ export function useCallManager(currentUser) {
             callId;
         }
 
-        // =================================================
-        // PEER NOT READY OR REMOTE DESCRIPTION NOT READY
-        // =================================================
+        const peer =
+          peerRef.current;
+
+        // ----------------------------------------------
+        // PEER NOT READY
+        // ----------------------------------------------
 
         if (
           !peer ||
@@ -1369,9 +1434,9 @@ export function useCallManager(currentUser) {
           return;
         }
 
-        // =================================================
+        // ----------------------------------------------
         // ADD ICE
-        // =================================================
+        // ----------------------------------------------
 
         await peer.addIceCandidate(
           new RTCIceCandidate(
@@ -1490,7 +1555,7 @@ export function useCallManager(currentUser) {
   ]);
 
   // ==================================================
-  // ATTACH LOCAL STREAM WHEN VIDEO ELEMENT CHANGES
+  // ATTACH LOCAL STREAM
   // ==================================================
 
   useEffect(() => {
@@ -1511,7 +1576,7 @@ export function useCallManager(currentUser) {
   ]);
 
   // ==================================================
-  // ATTACH REMOTE STREAM WHEN AUDIO ELEMENT CHANGES
+  // ATTACH REMOTE AUDIO
   // ==================================================
 
   useEffect(() => {
@@ -1540,51 +1605,31 @@ export function useCallManager(currentUser) {
   // ==================================================
 
   return {
-    // ----------------------------------------------
     // State
-    // ----------------------------------------------
-
     call,
     incoming,
-
     status,
-
     muted,
     cameraOff,
-
     error,
 
-    // IMPORTANT
     localStream,
 
-    // ----------------------------------------------
     // Refs
-    // ----------------------------------------------
-
     localVideoRef,
     remoteVideoRef,
     remoteAudioRef,
 
-    // ----------------------------------------------
-    // Call functions
-    // ----------------------------------------------
-
+    // Functions
     startCall,
     acceptCall,
     rejectCall,
     endCall,
 
-    // ----------------------------------------------
-    // Controls
-    // ----------------------------------------------
-
     toggleMute,
     toggleCamera,
 
-    // ----------------------------------------------
-    // Extra information
-    // ----------------------------------------------
-
+    // Extra
     remoteUser:
       remoteUserRef.current,
 
