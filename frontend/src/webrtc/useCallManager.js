@@ -11,16 +11,25 @@ const iceServers = [
 export function useCallManager(currentUser) {
   const [call, setCall] = useState(null);
   const [incoming, setIncoming] = useState(null);
+
+  // idle | ringing | calling | connecting | connected | failed
   const [status, setStatus] = useState("idle");
+
   const [muted, setMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
   const [error, setError] = useState("");
 
+  // =========================================================
+  // VIDEO / AUDIO REFS
+  // =========================================================
+
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
-
-  // IMPORTANT: separate audio element for voice calls
   const remoteAudioRef = useRef(null);
+
+  // =========================================================
+  // WEBRTC REFS
+  // =========================================================
 
   const peerRef = useRef(null);
   const localStreamRef = useRef(null);
@@ -29,42 +38,86 @@ export function useCallManager(currentUser) {
   const remoteUserRef = useRef(null);
   const currentCallIdRef = useRef(null);
 
-  // ICE candidates can arrive before remote description
+  // ICE candidates which arrive before remote description
   const pendingCandidatesRef = useRef([]);
 
-  // -----------------------------------------
-  // Close media
-  // -----------------------------------------
+  // =========================================================
+  // CLOSE MEDIA
+  // =========================================================
 
   const closeMedia = useCallback(() => {
-    try {
-      peerRef.current?.close();
-    } catch (err) {
-      console.error("Peer close error:", err);
+    console.log("🧹 Closing call...");
+
+    // -------------------------------------------------------
+    // Close peer connection
+    // -------------------------------------------------------
+
+    if (peerRef.current) {
+      try {
+        peerRef.current.ontrack = null;
+        peerRef.current.onicecandidate = null;
+        peerRef.current.onconnectionstatechange = null;
+        peerRef.current.oniceconnectionstatechange = null;
+        peerRef.current.close();
+      } catch (err) {
+        console.error("Peer close error:", err);
+      }
     }
 
     peerRef.current = null;
 
+    // -------------------------------------------------------
+    // Stop microphone + camera
+    // -------------------------------------------------------
+
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => {
-        track.stop();
+        try {
+          track.stop();
+        } catch (err) {
+          console.error("Track stop error:", err);
+        }
       });
     }
 
     localStreamRef.current = null;
     remoteStreamRef.current = null;
+
     pendingCandidatesRef.current = [];
 
+    // -------------------------------------------------------
+    // Clear local video
+    // -------------------------------------------------------
+
     if (localVideoRef.current) {
+      try {
+        localVideoRef.current.pause();
+      } catch {}
+
       localVideoRef.current.srcObject = null;
     }
 
+    // -------------------------------------------------------
+    // Clear remote video
+    // -------------------------------------------------------
+
     if (remoteVideoRef.current) {
+      try {
+        remoteVideoRef.current.pause();
+      } catch {}
+
       remoteVideoRef.current.srcObject = null;
     }
 
+    // -------------------------------------------------------
+    // Clear remote audio
+    // -------------------------------------------------------
+
     if (remoteAudioRef.current) {
-      remoteAudioRef.current.pause();
+      try {
+        remoteAudioRef.current.pause();
+      } catch {}
+
       remoteAudioRef.current.srcObject = null;
     }
 
@@ -78,18 +131,17 @@ export function useCallManager(currentUser) {
     setCameraOff(false);
   }, []);
 
-  // -----------------------------------------
-  // Get microphone / camera
-  // -----------------------------------------
+  // =========================================================
+  // GET MICROPHONE / CAMERA
+  // =========================================================
 
   const getMedia = useCallback(async (type = "voice") => {
     setError("");
 
     if (!navigator.mediaDevices) {
       const message =
-        "Microphone/camera is not available. Open the app using localhost or HTTPS.";
+        "Microphone/camera is not available. Please use localhost or HTTPS.";
 
-      console.error(message);
       setError(message);
       throw new Error(message);
     }
@@ -98,7 +150,6 @@ export function useCallManager(currentUser) {
       const message =
         "Your browser does not support microphone/camera access.";
 
-      console.error(message);
       setError(message);
       throw new Error(message);
     }
@@ -108,44 +159,99 @@ export function useCallManager(currentUser) {
         echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true,
+        channelCount: 1,
       },
+
       video:
         type === "video"
           ? {
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
+              width: {
+                ideal: 1280,
+              },
+              height: {
+                ideal: 720,
+              },
               facingMode: "user",
             }
           : false,
     };
 
     try {
-      console.log("Requesting media:", constraints);
+      console.log("🎤 Requesting media:", constraints);
 
       const stream =
-        await navigator.mediaDevices.getUserMedia(constraints);
+        await navigator.mediaDevices.getUserMedia(
+          constraints
+        );
 
-      console.log("Media permission granted");
+      // =====================================================
+      // MICROPHONE CHECK
+      // =====================================================
 
-      stream.getAudioTracks().forEach((track) => {
+      const audioTracks =
+        stream.getAudioTracks();
+
+      console.log(
+        "🎤 Microphone tracks:",
+        audioTracks.length
+      );
+
+      if (audioTracks.length === 0) {
+        throw new Error(
+          "No microphone track found."
+        );
+      }
+
+      audioTracks.forEach((track) => {
         track.enabled = true;
 
-        console.log("Local audio track:", {
-          enabled: track.enabled,
-          muted: track.muted,
-          readyState: track.readyState,
-          label: track.label,
-        });
+        console.log(
+          "🎤 Local microphone:",
+          {
+            id: track.id,
+            label: track.label,
+            enabled: track.enabled,
+            muted: track.muted,
+            readyState: track.readyState,
+          }
+        );
       });
 
-      stream.getVideoTracks().forEach((track) => {
+      // =====================================================
+      // CAMERA CHECK
+      // =====================================================
+
+      const videoTracks =
+        stream.getVideoTracks();
+
+      videoTracks.forEach((track) => {
         track.enabled = true;
+
+        console.log(
+          "📷 Local camera:",
+          {
+            id: track.id,
+            label: track.label,
+            enabled: track.enabled,
+            muted: track.muted,
+            readyState: track.readyState,
+          }
+        );
       });
 
       localStreamRef.current = stream;
 
-      if (localVideoRef.current && type === "video") {
-        localVideoRef.current.srcObject = stream;
+      // =====================================================
+      // LOCAL VIDEO
+      // =====================================================
+
+      if (
+        type === "video" &&
+        localVideoRef.current
+      ) {
+        localVideoRef.current.srcObject =
+          stream;
+
         localVideoRef.current.muted = true;
         localVideoRef.current.autoplay = true;
         localVideoRef.current.playsInline = true;
@@ -153,224 +259,424 @@ export function useCallManager(currentUser) {
         try {
           await localVideoRef.current.play();
         } catch (err) {
-          console.warn("Local video autoplay failed:", err);
+          console.warn(
+            "Local video play failed:",
+            err
+          );
         }
       }
 
+      console.log(
+        "✅ Local media ready"
+      );
+
       return stream;
     } catch (err) {
-      console.error("getUserMedia failed:", err);
+      console.error(
+        "❌ getUserMedia failed:",
+        err
+      );
 
-      let message = "Could not access microphone/camera.";
+      let message =
+        "Could not access microphone/camera.";
 
       if (err.name === "NotAllowedError") {
         message =
-          "Microphone/camera permission was denied. Please allow permission in browser settings.";
-      } else if (err.name === "NotFoundError") {
+          "Microphone/camera permission denied. Please allow permission in browser settings.";
+      }
+
+      if (err.name === "NotFoundError") {
         message =
-          "No microphone or camera was found on this device.";
-      } else if (err.name === "NotReadableError") {
+          "No microphone or camera found.";
+      }
+
+      if (err.name === "NotReadableError") {
         message =
           "Microphone/camera is already being used by another application.";
-      } else if (err.name === "SecurityError") {
+      }
+
+      if (err.name === "SecurityError") {
         message =
-          "Camera/microphone access is blocked because the connection is not secure.";
+          "Microphone/camera requires localhost or HTTPS.";
       }
 
       setError(message);
+
       throw new Error(message);
     }
   }, []);
 
-  // -----------------------------------------
-  // Play remote audio
-  // -----------------------------------------
+  // =========================================================
+  // PLAY REMOTE AUDIO
+  // =========================================================
 
-  const playRemoteAudio = useCallback(async (stream) => {
-    if (!remoteAudioRef.current || !stream) {
-      console.warn("Remote audio element or stream missing");
-      return;
-    }
+  const playRemoteAudio = useCallback(
+    async (stream) => {
+      const audio =
+        remoteAudioRef.current;
 
-    const audio = remoteAudioRef.current;
+      if (!audio) {
+        console.warn(
+          "⚠️ Remote audio element not available"
+        );
+        return;
+      }
 
-    audio.srcObject = stream;
-    audio.autoplay = true;
-    audio.controls = false;
-    audio.muted = false;
-    audio.volume = 1;
+      if (!stream) {
+        console.warn(
+          "⚠️ Remote stream not available"
+        );
+        return;
+      }
 
-    console.log("Remote audio stream attached", {
-      audioTracks: stream.getAudioTracks().length,
-      tracks: stream.getTracks().map((track) => ({
-        kind: track.kind,
-        enabled: track.enabled,
-        muted: track.muted,
-        readyState: track.readyState,
-        label: track.label,
-      })),
-    });
+      const audioTracks =
+        stream.getAudioTracks();
 
-    try {
-      await audio.play();
-      console.log("Remote audio PLAYING");
-    } catch (err) {
-      console.error("Remote audio play failed:", err);
-      setError(
-        "Remote audio was blocked by the browser. Click the call screen and try again."
+      console.log(
+        "🔊 Remote audio tracks:",
+        audioTracks.length
       );
-    }
-  }, []);
 
-  // -----------------------------------------
-  // Create WebRTC peer
-  // -----------------------------------------
+      audio.srcObject = stream;
+      audio.autoplay = true;
+      audio.controls = false;
+      audio.muted = false;
+      audio.volume = 1;
+      audio.playsInline = true;
+
+      audioTracks.forEach((track) => {
+        console.log(
+          "🔊 Remote audio track:",
+          {
+            id: track.id,
+            enabled: track.enabled,
+            muted: track.muted,
+            readyState: track.readyState,
+            label: track.label,
+          }
+        );
+      });
+
+      try {
+        await audio.play();
+
+        console.log(
+          "✅ Remote audio playing"
+        );
+      } catch (err) {
+        console.error(
+          "❌ Remote audio play failed:",
+          err
+        );
+
+        setError(
+          "Remote audio was blocked. Click the call screen and try again."
+        );
+      }
+    },
+    []
+  );
+
+  // =========================================================
+  // CREATE PEER
+  // =========================================================
 
   const createPeer = useCallback(
     (targetUserId, callId = null) => {
-      const socket = getSocket();
+      const socket =
+        getSocket();
 
-      const peer = new RTCPeerConnection({
-        iceServers,
-      });
+      // =====================================================
+      // VERY IMPORTANT
+      // NEVER CREATE TWO PEERS FOR ONE CALL
+      // =====================================================
+
+      if (peerRef.current) {
+        console.log(
+          "♻️ Using existing WebRTC peer"
+        );
+
+        return peerRef.current;
+      }
+
+      console.log(
+        "🆕 Creating WebRTC peer"
+      );
+
+      const peer =
+        new RTCPeerConnection({
+          iceServers,
+        });
+
+      // =====================================================
+      // ICE CANDIDATE
+      // =====================================================
 
       peer.onicecandidate = (event) => {
-        if (!event.candidate) return;
+        if (!event.candidate) {
+          return;
+        }
 
-        socket?.emit("webrtc:ice-candidate", {
-          to: targetUserId,
-          candidate: event.candidate,
-          callId:
-            callId ||
-            currentCallIdRef.current,
-        });
+        console.log(
+          "🧊 Sending ICE candidate"
+        );
+
+        socket?.emit(
+          "webrtc:ice-candidate",
+          {
+            to: targetUserId,
+            candidate:
+              event.candidate,
+            callId:
+              callId ||
+              currentCallIdRef.current,
+          }
+        );
       };
 
-      // -----------------------------------------
+      // =====================================================
       // REMOTE TRACK
-      // -----------------------------------------
+      // =====================================================
 
       peer.ontrack = async (event) => {
-        console.log("Remote track received:", {
-          kind: event.track.kind,
-          enabled: event.track.enabled,
-          muted: event.track.muted,
-          readyState: event.track.readyState,
-        });
+        console.log(
+          "📥 REMOTE TRACK:",
+          {
+            kind: event.track.kind,
+            id: event.track.id,
+            enabled:
+              event.track.enabled,
+            muted:
+              event.track.muted,
+            readyState:
+              event.track.readyState,
+          }
+        );
 
-        const stream =
-          event.streams?.[0] ||
-          remoteStreamRef.current ||
-          new MediaStream();
+        let stream =
+          event.streams?.[0];
 
-        if (!event.streams?.[0]) {
-          stream.addTrack(event.track);
+        // ---------------------------------------------------
+        // Fallback if browser doesn't provide stream
+        // ---------------------------------------------------
+
+        if (!stream) {
+          stream =
+            remoteStreamRef.current ||
+            new MediaStream();
+
+          const exists =
+            stream
+              .getTracks()
+              .some(
+                (track) =>
+                  track.id ===
+                  event.track.id
+              );
+
+          if (!exists) {
+            stream.addTrack(
+              event.track
+            );
+          }
         }
 
-        remoteStreamRef.current = stream;
+        remoteStreamRef.current =
+          stream;
 
-        const hasAudio =
-          stream.getAudioTracks().length > 0;
+        console.log(
+          "📥 Remote stream:",
+          {
+            audioTracks:
+              stream.getAudioTracks()
+                .length,
 
-        const hasVideo =
-          stream.getVideoTracks().length > 0;
+            videoTracks:
+              stream.getVideoTracks()
+                .length,
+          }
+        );
 
-        console.log("Remote stream:", {
-          hasAudio,
-          hasVideo,
-          audioTracks: stream.getAudioTracks().length,
-          videoTracks: stream.getVideoTracks().length,
-        });
-
+        // ===================================================
         // AUDIO
-        if (hasAudio && remoteAudioRef.current) {
-          await playRemoteAudio(stream);
+        // ===================================================
+
+        if (
+          stream.getAudioTracks()
+            .length > 0
+        ) {
+          await playRemoteAudio(
+            stream
+          );
         }
 
+        // ===================================================
         // VIDEO
-        if (hasVideo && remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = stream;
-          remoteVideoRef.current.autoplay = true;
-          remoteVideoRef.current.playsInline = true;
-          remoteVideoRef.current.muted = false;
-          remoteVideoRef.current.volume = 1;
+        // ===================================================
+
+        if (
+          stream.getVideoTracks()
+            .length > 0 &&
+          remoteVideoRef.current
+        ) {
+          const video =
+            remoteVideoRef.current;
+
+          video.srcObject =
+            stream;
+
+          video.autoplay = true;
+          video.playsInline = true;
+          video.muted = false;
+          video.volume = 1;
 
           try {
-            await remoteVideoRef.current.play();
-            console.log("Remote video PLAYING");
+            await video.play();
+
+            console.log(
+              "✅ Remote video playing"
+            );
           } catch (err) {
             console.error(
-              "Remote video play failed:",
+              "❌ Remote video play failed:",
               err
             );
           }
         }
       };
 
-      peer.onconnectionstatechange = () => {
-        console.log(
-          "WebRTC connection:",
-          peer.connectionState
-        );
+      // =====================================================
+      // CONNECTION STATE
+      // =====================================================
 
-        if (peer.connectionState === "connected") {
-          setStatus("connected");
-        }
-
-        if (peer.connectionState === "failed") {
-          console.error("WebRTC connection FAILED");
-          setStatus("failed");
-        }
-
-        if (peer.connectionState === "disconnected") {
-          console.warn(
-            "WebRTC temporarily disconnected"
+      peer.onconnectionstatechange =
+        () => {
+          console.log(
+            "🌐 WebRTC connection:",
+            peer.connectionState
           );
-        }
-      };
 
-      peer.oniceconnectionstatechange = () => {
-        console.log(
-          "ICE connection:",
-          peer.iceConnectionState
-        );
-      };
+          if (
+            peer.connectionState ===
+            "connected"
+          ) {
+            console.log(
+              "✅ WEBRTC CONNECTED"
+            );
 
-      peerRef.current = peer;
+            setStatus(
+              "connected"
+            );
+          }
+
+          if (
+            peer.connectionState ===
+            "connecting"
+          ) {
+            setStatus(
+              "connecting"
+            );
+          }
+
+          if (
+            peer.connectionState ===
+            "failed"
+          ) {
+            console.error(
+              "❌ WEBRTC FAILED"
+            );
+
+            setStatus(
+              "failed"
+            );
+
+            setError(
+              "WebRTC connection failed."
+            );
+          }
+
+          if (
+            peer.connectionState ===
+            "disconnected"
+          ) {
+            console.warn(
+              "⚠️ WebRTC disconnected"
+            );
+          }
+        };
+
+      // =====================================================
+      // ICE STATE
+      // =====================================================
+
+      peer.oniceconnectionstatechange =
+        () => {
+          console.log(
+            "🧊 ICE:",
+            peer.iceConnectionState
+          );
+        };
+
+      peerRef.current =
+        peer;
 
       return peer;
     },
-    [call?._id, playRemoteAudio]
+    [playRemoteAudio]
   );
 
-  // -----------------------------------------
-  // Add pending ICE candidates
-  // -----------------------------------------
+  // =========================================================
+  // ADD PENDING ICE
+  // =========================================================
 
-  const addPendingCandidates = useCallback(async (peer) => {
-    if (!peer.remoteDescription) return;
-
-    const candidates = pendingCandidatesRef.current;
-
-    pendingCandidatesRef.current = [];
-
-    for (const candidate of candidates) {
-      try {
-        await peer.addIceCandidate(
-          new RTCIceCandidate(candidate)
-        );
-      } catch (err) {
-        console.error(
-          "Pending ICE candidate error:",
-          err
-        );
+  const addPendingCandidates =
+    useCallback(async (peer) => {
+      if (
+        !peer ||
+        !peer.remoteDescription
+      ) {
+        return;
       }
-    }
-  }, []);
 
-  // -----------------------------------------
-  // Start call
-  // -----------------------------------------
+      const candidates =
+        pendingCandidatesRef.current;
+
+      if (!candidates.length) {
+        return;
+      }
+
+      pendingCandidatesRef.current =
+        [];
+
+      console.log(
+        `🧊 Adding ${candidates.length} queued candidates`
+      );
+
+      for (
+        const candidate of candidates
+      ) {
+        try {
+          await peer.addIceCandidate(
+            new RTCIceCandidate(
+              candidate
+            )
+          );
+
+          console.log(
+            "✅ Queued ICE added"
+          );
+        } catch (err) {
+          console.error(
+            "❌ Queued ICE error:",
+            err
+          );
+        }
+      }
+    }, []);
+
+  // =========================================================
+  // START CALL
+  // =========================================================
 
   const startCall = async ({
     receiver,
@@ -380,67 +686,154 @@ export function useCallManager(currentUser) {
     try {
       setError("");
 
-      const socket = getSocket();
+      const socket =
+        getSocket();
 
       if (!socket) {
-        setError(
+        throw new Error(
           "Socket connection is not available."
         );
-        return;
       }
 
       if (!receiver?._id) {
-        setError(
+        throw new Error(
           "Receiver information is missing."
         );
-        return;
       }
 
-      console.log("Starting call:", {
-        receiver: receiver._id,
-        type,
-        conversationId,
-      });
+      console.log(
+        "📞 START CALL",
+        {
+          receiver:
+            receiver._id,
+          type,
+          conversationId,
+        }
+      );
 
       remoteUserRef.current =
         receiver._id;
 
+      // =====================================================
+      // GET LOCAL MEDIA
+      // =====================================================
+
       const stream =
         await getMedia(type);
 
-      const peer = createPeer(
-        receiver._id
+      // =====================================================
+      // CREATE PEER
+      // =====================================================
+
+      const peer =
+        createPeer(
+          receiver._id
+        );
+
+      // =====================================================
+      // ADD ALL LOCAL TRACKS
+      // =====================================================
+
+      stream
+        .getTracks()
+        .forEach((track) => {
+          console.log(
+            "📤 ADDING LOCAL TRACK:",
+            {
+              kind:
+                track.kind,
+              id:
+                track.id,
+              enabled:
+                track.enabled,
+              muted:
+                track.muted,
+              readyState:
+                track.readyState,
+            }
+          );
+
+          peer.addTrack(
+            track,
+            stream
+          );
+        });
+
+      // =====================================================
+      // MICROPHONE VERIFY
+      // =====================================================
+
+      const audioTracks =
+        stream.getAudioTracks();
+
+      console.log(
+        "🎤 AUDIO TRACKS BEING SENT:",
+        audioTracks.length
       );
 
-      stream.getTracks().forEach((track) => {
-        peer.addTrack(track, stream);
-      });
+      audioTracks.forEach(
+        (track) => {
+          console.log(
+            "🎤 MIC:",
+            {
+              enabled:
+                track.enabled,
+              muted:
+                track.muted,
+              readyState:
+                track.readyState,
+            }
+          );
+        }
+      );
+
+      // =====================================================
+      // CREATE CALL ON SERVER
+      // =====================================================
 
       socket.emit(
         "call:initiate",
         {
-          receiver: receiver._id,
-          participants: [receiver._id],
+          receiver:
+            receiver._id,
+
+          participants: [
+            receiver._id,
+          ],
+
           type,
+
           conversationId,
         },
         async (ack) => {
           try {
             if (!ack?.ok) {
-              setStatus("failed");
+              setStatus(
+                "failed"
+              );
+
               setError(
                 ack?.message ||
-                "Could not start call."
+                  "Could not start call."
               );
+
               return;
             }
 
-            setCall(ack.call);
+            setCall(
+              ack.call
+            );
 
             currentCallIdRef.current =
               ack.call._id;
 
-            setStatus("calling");
+            setStatus(
+              "calling"
+            );
+
+            // =================================================
+            // CREATE OFFER
+            // =================================================
 
             const offer =
               await peer.createOffer();
@@ -449,22 +842,34 @@ export function useCallManager(currentUser) {
               offer
             );
 
+            console.log(
+              "📤 Sending OFFER"
+            );
+
             socket.emit(
               "webrtc:offer",
               {
-                to: receiver._id,
+                to:
+                  receiver._id,
+
                 offer,
-                callId: ack.call._id,
+
+                callId:
+                  ack.call._id,
+
                 type,
               }
             );
           } catch (err) {
             console.error(
-              "Offer creation failed:",
+              "❌ Offer creation failed:",
               err
             );
 
-            setStatus("failed");
+            setStatus(
+              "failed"
+            );
+
             setError(
               "Could not establish the call."
             );
@@ -473,389 +878,663 @@ export function useCallManager(currentUser) {
       );
     } catch (err) {
       console.error(
-        "Start call failed:",
+        "❌ Start call failed:",
         err
       );
 
-      setStatus("failed");
+      setStatus(
+        "failed"
+      );
+
       setError(
         err.message ||
-        "Could not access microphone/camera."
+          "Could not access microphone/camera."
       );
     }
   };
 
-  // -----------------------------------------
-  // Accept call
-  // -----------------------------------------
+  // =========================================================
+  // ACCEPT CALL
+  // =========================================================
 
-  const acceptCall = async () => {
-    if (!incoming) return;
-
-    try {
-      setError("");
-
-      const socket = getSocket();
-
-      const remoteId =
-        incoming.from?._id ||
-        incoming.from;
-
-      const type =
-        incoming.call?.type ||
-        "voice";
-
-      remoteUserRef.current =
-        remoteId;
-
-      const stream =
-        await getMedia(type);
-
-      const peer = createPeer(
-        remoteId,
-        incoming.call?._id
-      );
-
-      stream.getTracks().forEach((track) => {
-        peer.addTrack(track, stream);
-      });
-
-      setCall(incoming.call);
-
-      currentCallIdRef.current =
-        incoming.call?._id;
-
-      setStatus("connecting");
-
-      socket?.emit("call:accept", {
-        to: remoteId,
-        callId: incoming.call?._id,
-      });
-
-      // Browser user gesture:
-      // try to start remote audio immediately
-      if (remoteAudioRef.current) {
-        remoteAudioRef.current.muted = false;
-
-        try {
-          await remoteAudioRef.current.play();
-        } catch (err) {
-          console.log(
-            "Audio will start when remote track arrives."
-          );
-        }
+  const acceptCall =
+    async () => {
+      if (!incoming) {
+        return;
       }
 
-      setIncoming(null);
-    } catch (err) {
-      console.error(
-        "Accept call failed:",
-        err
+      try {
+        setError("");
+
+        const socket =
+          getSocket();
+
+        const remoteId =
+          incoming.from?._id ||
+          incoming.from;
+
+        const type =
+          incoming.call?.type ||
+          "voice";
+
+        const callId =
+          incoming.call?._id;
+
+        console.log(
+          "📞 ACCEPT CALL",
+          {
+            remoteId,
+            type,
+            callId,
+          }
+        );
+
+        remoteUserRef.current =
+          remoteId;
+
+        currentCallIdRef.current =
+          callId;
+
+        // =====================================================
+        // GET LOCAL MEDIA
+        // =====================================================
+
+        const stream =
+          await getMedia(type);
+
+        // =====================================================
+        // CREATE ONLY ONE PEER
+        // =====================================================
+
+        const peer =
+          createPeer(
+            remoteId,
+            callId
+          );
+
+        // =====================================================
+        // ADD MICROPHONE + CAMERA
+        // =====================================================
+
+        stream
+          .getTracks()
+          .forEach((track) => {
+            console.log(
+              "📤 ACCEPT - ADD TRACK:",
+              {
+                kind:
+                  track.kind,
+                id:
+                  track.id,
+                enabled:
+                  track.enabled,
+                muted:
+                  track.muted,
+                readyState:
+                  track.readyState,
+              }
+            );
+
+            peer.addTrack(
+              track,
+              stream
+            );
+          });
+
+        // =====================================================
+        // IMPORTANT
+        // SHOW CONNECTED IMMEDIATELY AFTER ACCEPT
+        // =====================================================
+
+        setCall(
+          incoming.call
+        );
+
+        setStatus(
+          "connected"
+        );
+
+        // =====================================================
+        // ACCEPT ON SERVER
+        // =====================================================
+
+        socket?.emit(
+          "call:accept",
+          {
+            to:
+              remoteId,
+
+            callId,
+          }
+        );
+
+        // =====================================================
+        // REMOVE INCOMING SCREEN
+        // =====================================================
+
+        setIncoming(
+          null
+        );
+
+        console.log(
+          "✅ CALL ACCEPTED"
+        );
+      } catch (err) {
+        console.error(
+          "❌ Accept call failed:",
+          err
+        );
+
+        setStatus(
+          "failed"
+        );
+
+        setError(
+          err.message ||
+            "Could not access microphone/camera."
+        );
+      }
+    };
+
+  // =========================================================
+  // REJECT
+  // =========================================================
+
+  const rejectCall =
+    () => {
+      const socket =
+        getSocket();
+
+      const remoteId =
+        incoming?.from?._id ||
+        incoming?.from;
+
+      const callId =
+        incoming?.call?._id;
+
+      socket?.emit(
+        "call:reject",
+        {
+          to:
+            remoteId,
+          callId,
+        }
       );
 
-      setStatus("failed");
-
-      setError(
-        err.message ||
-        "Could not access microphone/camera."
+      setIncoming(
+        null
       );
-    }
-  };
 
-  // -----------------------------------------
-  // Reject call
-  // -----------------------------------------
+      setStatus(
+        "idle"
+      );
+    };
 
-  const rejectCall = () => {
-    const socket = getSocket();
+  // =========================================================
+  // END CALL
+  // =========================================================
 
-    const remoteId =
-      incoming?.from?._id ||
-      incoming?.from;
+  const endCall =
+    () => {
+      const socket =
+        getSocket();
 
-    const callId =
-      incoming?.call?._id;
+      const remoteId =
+        remoteUserRef.current;
 
-    socket?.emit("call:reject", {
-      to: remoteId,
-      callId,
-    });
-
-    setIncoming(null);
-    setStatus("idle");
-  };
-
-  // -----------------------------------------
-  // End call
-  // -----------------------------------------
-
-  const endCall = () => {
-    const socket = getSocket();
-
-    socket?.emit("call:end", {
-      to: remoteUserRef.current,
-      callId:
+      const callId =
         call?._id ||
-        currentCallIdRef.current,
-    });
+        currentCallIdRef.current;
 
-    closeMedia();
-  };
+      console.log(
+        "☎️ END CALL",
+        {
+          remoteId,
+          callId,
+        }
+      );
 
-  // -----------------------------------------
-  // Mute
-  // -----------------------------------------
+      socket?.emit(
+        "call:end",
+        {
+          to:
+            remoteId,
+          callId,
+        }
+      );
 
-  const toggleMute = () => {
-    const tracks =
-      localStreamRef.current?.getAudioTracks();
+      closeMedia();
+    };
 
-    if (!tracks?.length) return;
+  // =========================================================
+  // MUTE
+  // =========================================================
 
-    const nextEnabled =
-      !tracks[0].enabled;
+  const toggleMute =
+    () => {
+      const stream =
+        localStreamRef.current;
 
-    tracks.forEach((track) => {
-      track.enabled = nextEnabled;
-    });
+      if (!stream) {
+        console.warn(
+          "⚠️ No local stream"
+        );
+        return;
+      }
 
-    setMuted(!nextEnabled);
+      const tracks =
+        stream.getAudioTracks();
 
-    console.log(
-      "Microphone:",
-      nextEnabled ? "ON" : "OFF"
-    );
-  };
+      if (!tracks.length) {
+        console.warn(
+          "⚠️ No microphone track"
+        );
+        return;
+      }
 
-  // -----------------------------------------
-  // Camera
-  // -----------------------------------------
+      const currentEnabled =
+        tracks[0].enabled;
 
-  const toggleCamera = () => {
-    const tracks =
-      localStreamRef.current?.getVideoTracks();
+      const nextEnabled =
+        !currentEnabled;
 
-    if (!tracks?.length) return;
+      tracks.forEach(
+        (track) => {
+          track.enabled =
+            nextEnabled;
+        }
+      );
 
-    const nextEnabled =
-      !tracks[0].enabled;
+      setMuted(
+        !nextEnabled
+      );
 
-    tracks.forEach((track) => {
-      track.enabled = nextEnabled;
-    });
+      console.log(
+        nextEnabled
+          ? "🎤 MICROPHONE ON"
+          : "🔇 MICROPHONE OFF"
+      );
+    };
 
-    setCameraOff(!nextEnabled);
-  };
+  // =========================================================
+  // CAMERA
+  // =========================================================
 
-  // -----------------------------------------
-  // Socket events
-  // -----------------------------------------
+  const toggleCamera =
+    () => {
+      const stream =
+        localStreamRef.current;
+
+      if (!stream) {
+        return;
+      }
+
+      const tracks =
+        stream.getVideoTracks();
+
+      if (!tracks.length) {
+        return;
+      }
+
+      const currentEnabled =
+        tracks[0].enabled;
+
+      const nextEnabled =
+        !currentEnabled;
+
+      tracks.forEach(
+        (track) => {
+          track.enabled =
+            nextEnabled;
+        }
+      );
+
+      setCameraOff(
+        !nextEnabled
+      );
+
+      console.log(
+        nextEnabled
+          ? "📷 CAMERA ON"
+          : "📷 CAMERA OFF"
+      );
+    };
+
+  // =========================================================
+  // SOCKET EVENTS
+  // =========================================================
 
   useEffect(() => {
-    const socket = getSocket();
+    const socket =
+      getSocket();
 
     if (!socket || !currentUser) {
       return;
     }
 
-    // Incoming ring
-    const onRing = (payload) => {
-      console.log(
-        "Incoming call:",
-        payload
-      );
+    // =======================================================
+    // INCOMING CALL
+    // =======================================================
 
-      setIncoming(payload);
-      setStatus("ringing");
-    };
-
-    // -----------------------------------------
-    // Offer
-    // -----------------------------------------
-
-    const onOffer = async ({
-      offer,
-      from,
-      callId,
-      type,
-    }) => {
-      try {
+    const onRing =
+      (payload) => {
         console.log(
-          "WebRTC offer received"
+          "📞 INCOMING CALL:",
+          payload
         );
 
-        remoteUserRef.current = from;
-        currentCallIdRef.current =
-          callId;
-
-        const stream =
-          await getMedia(type);
-
-        const peer = createPeer(
-          from,
-          callId
+        setIncoming(
+          payload
         );
 
-        stream.getTracks().forEach(
-          (track) => {
-            peer.addTrack(
-              track,
-              stream
+        setStatus(
+          "ringing"
+        );
+      };
+
+    // =======================================================
+    // OFFER
+    // =======================================================
+
+    const onOffer =
+      async ({
+        offer,
+        from,
+        callId,
+        type,
+      }) => {
+        try {
+          console.log(
+            "📥 OFFER RECEIVED",
+            {
+              from,
+              callId,
+              type,
+            }
+          );
+
+          remoteUserRef.current =
+            from;
+
+          currentCallIdRef.current =
+            callId;
+
+          // =================================================
+          // REUSE PEER CREATED BY ACCEPT CALL
+          // =================================================
+
+          let peer =
+            peerRef.current;
+
+          if (!peer) {
+            console.log(
+              "🆕 Creating peer from offer"
+            );
+
+            const stream =
+              await getMedia(
+                type
+              );
+
+            peer =
+              createPeer(
+                from,
+                callId
+              );
+
+            stream
+              .getTracks()
+              .forEach(
+                (track) => {
+                  peer.addTrack(
+                    track,
+                    stream
+                  );
+                }
+              );
+          } else {
+            console.log(
+              "♻️ Reusing existing peer"
             );
           }
-        );
 
-        await peer.setRemoteDescription(
-          new RTCSessionDescription(
-            offer
-          )
-        );
+          // =================================================
+          // SET REMOTE DESCRIPTION
+          // =================================================
 
-        await addPendingCandidates(peer);
-
-        const answer =
-          await peer.createAnswer();
-
-        await peer.setLocalDescription(
-          answer
-        );
-
-        socket.emit(
-          "webrtc:answer",
-          {
-            to: from,
-            answer,
-            callId,
-          }
-        );
-
-        setCall((existing) =>
-          existing || {
-            _id: callId,
-            type,
-          }
-        );
-
-        setStatus("connecting");
-
-        setIncoming(null);
-      } catch (err) {
-        console.error(
-          "Offer handling failed:",
-          err
-        );
-
-        setStatus("failed");
-
-        setError(
-          err.message ||
-          "Could not accept the call."
-        );
-      }
-    };
-
-    // -----------------------------------------
-    // Answer
-    // -----------------------------------------
-
-    const onAnswer = async ({
-      answer,
-    }) => {
-      try {
-        if (!peerRef.current) {
-          console.warn(
-            "No peer available for answer"
-          );
-          return;
-        }
-
-        await peerRef.current.setRemoteDescription(
-          new RTCSessionDescription(
-            answer
-          )
-        );
-
-        await addPendingCandidates(
-          peerRef.current
-        );
-
-        setStatus("connecting");
-      } catch (err) {
-        console.error(
-          "Answer handling failed:",
-          err
-        );
-
-        setStatus("failed");
-      }
-    };
-
-    // -----------------------------------------
-    // ICE candidate
-    // -----------------------------------------
-
-    const onCandidate = async ({
-      candidate,
-    }) => {
-      try {
-        if (!candidate) return;
-
-        const peer =
-          peerRef.current;
-
-        if (
-          !peer ||
-          !peer.remoteDescription
-        ) {
-          pendingCandidatesRef.current.push(
-            candidate
+          await peer.setRemoteDescription(
+            new RTCSessionDescription(
+              offer
+            )
           );
 
           console.log(
-            "ICE candidate queued"
+            "✅ Remote description set"
           );
 
-          return;
+          // =================================================
+          // ADD QUEUED ICE
+          // =================================================
+
+          await addPendingCandidates(
+            peer
+          );
+
+          // =================================================
+          // CREATE ANSWER
+          // =================================================
+
+          const answer =
+            await peer.createAnswer();
+
+          await peer.setLocalDescription(
+            answer
+          );
+
+          console.log(
+            "📤 Sending ANSWER"
+          );
+
+          socket.emit(
+            "webrtc:answer",
+            {
+              to:
+                from,
+
+              answer,
+
+              callId,
+            }
+          );
+
+          setCall(
+            (existing) =>
+              existing || {
+                _id:
+                  callId,
+
+                type:
+                  type,
+              }
+          );
+
+          // =================================================
+          // ACCEPTED / CONNECTED UI
+          // =================================================
+
+          setStatus(
+            "connected"
+          );
+
+          setIncoming(
+            null
+          );
+
+          console.log(
+            "✅ CALL CONNECTED"
+          );
+        } catch (err) {
+          console.error(
+            "❌ Offer handling failed:",
+            err
+          );
+
+          setStatus(
+            "failed"
+          );
+
+          setError(
+            err.message ||
+              "Could not accept the call."
+          );
         }
+      };
 
-        await peer.addIceCandidate(
-          new RTCIceCandidate(candidate)
-        );
+    // =======================================================
+    // ANSWER
+    // =======================================================
 
+    const onAnswer =
+      async ({
+        answer,
+      }) => {
+        try {
+          const peer =
+            peerRef.current;
+
+          if (!peer) {
+            console.warn(
+              "⚠️ No peer for answer"
+            );
+            return;
+          }
+
+          console.log(
+            "📥 ANSWER RECEIVED"
+          );
+
+          await peer.setRemoteDescription(
+            new RTCSessionDescription(
+              answer
+            )
+          );
+
+          console.log(
+            "✅ Answer remote description set"
+          );
+
+          await addPendingCandidates(
+            peer
+          );
+
+          // =================================================
+          // CALLER ALSO SHOW CONNECTED
+          // =================================================
+
+          setStatus(
+            "connected"
+          );
+
+          console.log(
+            "✅ CALL CONNECTED"
+          );
+        } catch (err) {
+          console.error(
+            "❌ Answer handling failed:",
+            err
+          );
+
+          setStatus(
+            "failed"
+          );
+
+          setError(
+            "Could not complete WebRTC connection."
+          );
+        }
+      };
+
+    // =======================================================
+    // ICE
+    // =======================================================
+
+    const onCandidate =
+      async ({
+        candidate,
+      }) => {
+        try {
+          if (!candidate) {
+            return;
+          }
+
+          const peer =
+            peerRef.current;
+
+          // -------------------------------------------------
+          // Remote description not ready
+          // -------------------------------------------------
+
+          if (
+            !peer ||
+            !peer.remoteDescription
+          ) {
+            console.log(
+              "🧊 Queueing ICE candidate"
+            );
+
+            pendingCandidatesRef.current.push(
+              candidate
+            );
+
+            return;
+          }
+
+          await peer.addIceCandidate(
+            new RTCIceCandidate(
+              candidate
+            )
+          );
+
+          console.log(
+            "✅ ICE candidate added"
+          );
+        } catch (err) {
+          console.error(
+            "❌ ICE error:",
+            err
+          );
+        }
+      };
+
+    // =======================================================
+    // REMOTE END
+    // =======================================================
+
+    const onEnd =
+      () => {
         console.log(
-          "ICE candidate added"
+          "☎️ Remote ended call"
         );
-      } catch (err) {
-        console.error(
-          "ICE candidate error:",
-          err
+
+        closeMedia();
+      };
+
+    // =======================================================
+    // REMOTE REJECT
+    // =======================================================
+
+    const onReject =
+      () => {
+        console.log(
+          "❌ Remote rejected call"
         );
-      }
-    };
 
-    // -----------------------------------------
-    // Call ended
-    // -----------------------------------------
+        closeMedia();
+      };
 
-    const onEnd = () => {
-      console.log(
-        "Remote ended call"
-      );
-
-      closeMedia();
-    };
-
-    // -----------------------------------------
-    // Call rejected
-    // -----------------------------------------
-
-    const onReject = () => {
-      console.log(
-        "Remote rejected call"
-      );
-
-      closeMedia();
-    };
+    // =======================================================
+    // REGISTER
+    // =======================================================
 
     socket.on(
       "call:ring",
@@ -886,6 +1565,10 @@ export function useCallManager(currentUser) {
       "call:reject",
       onReject
     );
+
+    // =======================================================
+    // CLEANUP
+    // =======================================================
 
     return () => {
       socket.off(
@@ -926,6 +1609,10 @@ export function useCallManager(currentUser) {
     addPendingCandidates,
   ]);
 
+  // =========================================================
+  // RETURN
+  // =========================================================
+
   return {
     call,
     incoming,
@@ -936,9 +1623,11 @@ export function useCallManager(currentUser) {
 
     localVideoRef,
     remoteVideoRef,
-
-    // IMPORTANT
     remoteAudioRef,
+
+    // Useful if needed elsewhere
+    localStream:
+      localStreamRef.current,
 
     startCall,
     acceptCall,
@@ -949,4 +1638,5 @@ export function useCallManager(currentUser) {
     toggleCamera,
   };
 }
+
 
